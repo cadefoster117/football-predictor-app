@@ -19,7 +19,11 @@ async function run(){
 
  const predictions=[]
 
+ let scanned=0
+
  for(const m of matches){
+
+  scanned++
 
   if(!m.idLeague) continue
 
@@ -64,12 +68,21 @@ async function run(){
 
  const top=predictions.slice(0,10)
 
+ const output={
+
+  last_scan:new Date().toISOString(),
+  games_scanned:scanned,
+  predictions:top
+
+ }
+
  fs.writeFileSync(
   "predictions.json",
-  JSON.stringify(top,null,2)
+  JSON.stringify(output,null,2)
  )
 
- console.log("Predictions generated")
+ console.log("Scan finished")
+ console.log("Games scanned:",scanned)
 
 }
 
