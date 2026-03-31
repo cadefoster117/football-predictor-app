@@ -15,13 +15,18 @@ app.get("/predictions",(req,res)=>{
 
  try{
 
-  const data=fs.readFileSync("predictions.json")
+  const data=
+  fs.readFileSync("predictions.json")
 
   res.json(JSON.parse(data))
 
  }catch{
 
-  res.json([])
+  res.json({
+   last_scan:null,
+   games_scanned:0,
+   predictions:[]
+  })
 
  }
 
