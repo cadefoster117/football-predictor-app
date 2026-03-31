@@ -1,15 +1,14 @@
-const historyData =
+const history=
 JSON.parse(
-localStorage.getItem("history") || "[]"
+localStorage.getItem("history")||"[]"
 )
 
-const container =
+const container=
 document.getElementById("history")
 
-historyData.forEach(h=>{
+history.forEach(h=>{
 
- const div =
- document.createElement("div")
+ const div=document.createElement("div")
 
  div.className="card"
 

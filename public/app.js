@@ -1,23 +1,19 @@
-const API =
-"https://football-predictor-chatgpt.onrender.com/predictions"
+const API="/predictions"
 
-async function loadPredictions(){
+async function load(){
 
- const res =
- await fetch(API)
+ const res=await fetch(API)
 
- const games =
- await res.json()
+ const data=await res.json()
 
- const container =
- document.getElementById("predictions")
+ const container=
+ document.getElementById("games")
 
  container.innerHTML=""
 
- games.forEach(g=>{
+ data.forEach(g=>{
 
-  const div =
-  document.createElement("div")
+  const div=document.createElement("div")
 
   div.className="card"
 
@@ -26,8 +22,8 @@ async function loadPredictions(){
   "<h3>"+g.match+"</h3>"+
   "<p>"+g.league+"</p>"+
   "<p>"+g.prediction+"</p>"+
-  "<p>Over2.5: "+(g.probability.over25*100).toFixed(0)+"%</p>"+
-  "<p>BTTS: "+(g.probability.btts*100).toFixed(0)+"%</p>"
+  "<p>Over2.5 "+(g.probability.over25*100).toFixed(0)+"%</p>"+
+  "<p>BTTS "+(g.probability.btts*100).toFixed(0)+"%</p>"
 
   container.appendChild(div)
 
@@ -35,7 +31,9 @@ async function loadPredictions(){
 
 }
 
-loadPredictions()
+load()
+
+setInterval(load,600000)
 
 if("serviceWorker" in navigator){
 
