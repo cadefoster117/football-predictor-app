@@ -29,6 +29,7 @@ async function loadPredictions(){
     <div class="game">
      <h3>${p.match}</h3>
      <p>${p.league}</p>
+     <p>${p.date} | ${p.time}</p>
      <p><b>${p.prediction}</b></p>
      <p>
       Over2.5: ${(p.probability.over25*100).toFixed(1)}% |
