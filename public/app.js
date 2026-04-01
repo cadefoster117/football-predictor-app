@@ -1,43 +1,54 @@
-const API="/predictions"
+async function loadPredictions(){
 
-async function load(){
+ try{
 
- const res=await fetch(API)
+  const res = await fetch("/predictions")
 
- const data=await res.json()
+  const data = await res.json()
 
- const container=
- document.getElementById("games")
+  const container = document.getElementById("games")
 
- container.innerHTML=""
+  const info = document.getElementById("info")
 
- data.forEach(g=>{
+  if(!data.predictions || data.predictions.length===0){
 
-  const div=document.createElement("div")
+   container.innerHTML="No predictions today yet."
+   return
 
-  div.className="card"
+  }
 
-  div.innerHTML=
+  info.innerHTML=
+   "Last scan: "+data.last_scan+
+   " | Games scanned: "+data.games_scanned
 
-  "<h3>"+g.match+"</h3>"+
-  "<p>"+g.league+"</p>"+
-  "<p>"+g.prediction+"</p>"+
-  "<p>Over2.5 "+(g.probability.over25*100).toFixed(0)+"%</p>"+
-  "<p>BTTS "+(g.probability.btts*100).toFixed(0)+"%</p>"
+  let html=""
 
-  container.appendChild(div)
+  data.predictions.forEach(p=>{
 
- })
+   html+=`
+    <div class="game">
+     <h3>${p.match}</h3>
+     <p>${p.league}</p>
+     <p><b>${p.prediction}</b></p>
+     <p>
+      Over2.5: ${(p.probability.over25*100).toFixed(1)}% |
+      BTTS: ${(p.probability.btts*100).toFixed(1)}%
+     </p>
+    </div>
+   `
+
+  })
+
+  container.innerHTML=html
+
+ }catch(e){
+
+  console.log(e)
+
+ }
 
 }
 
-load()
+loadPredictions()
 
-setInterval(load,600000)
-
-if("serviceWorker" in navigator){
-
- navigator.serviceWorker
- .register("sw.js")
-
-}
+setInterval(loadPredictions,60000)
