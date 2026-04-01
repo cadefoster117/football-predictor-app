@@ -2,55 +2,17 @@
 //  AivsBookie — engine.js
 //  Run: node engine.js
 //
-//  1. Fetches ALL today's games from BSD API (paginated)
-//  2. Scores each by Over2.5 × BTTS combo
-//  3. Sends top 20 candidates to Claude with 3
-//     different analyst personas (ensemble)
-//  4. Only keeps picks where ALL 3 vote YES
-//  5. Saves to public/predictions.json
+//  Uses local analysts.js — no API needed.
 // ══════════════════════════════════════════
 
 require("dotenv").config()
 
 const fs    = require("fs")
 const axios = require("axios")
+const { runEnsemble } = require("./analysts")
 
-const BSD_API       = "https://sports.bzzoiro.com/api/predictions/?upcoming=true"
-const BSD_TOKEN     = process.env.BSD_TOKEN
-const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY
-const CLAUDE_MODEL  = "claude-sonnet-4-20250514"
-
-// ── Analyst personas ──────────────────────
-
-const PERSONAS = {
-  statistics: {
-    name: "Statistics Analyst",
-    system: `You are a cold, data-driven football statistics analyst.
-You only trust probability numbers from ML models.
-You are strict — you say YES only if both prob_over_25 and prob_btts_yes
-are individually strong AND their combined score is high.
-If either number is weak, you vote NO. No exceptions.`
-  },
-
-  form: {
-    name: "Form & Context Analyst",
-    system: `You are a football form and match-context analyst.
-You think about whether this league and fixture type typically produces
-high-scoring, open games where both teams attack.
-You consider team dynamics, fixture importance, and whether the match
-setup favours goals. You use the expected goals data as your key signal.`
-  },
-
-  value: {
-    name: "Value & Risk Analyst",
-    system: `You are a football betting value and risk analyst.
-You are the most skeptical of the three analysts.
-You assess whether the Over 2.5 & BTTS combination is genuinely worth
-backing or if there are red flags — one defensive team, low xG for either
-side, or an inflated combo probability.
-You reject borderline picks. Only strong setups get a YES from you.`
-  }
-}
+const BSD_API   = "https://sports.bzzoiro.com/api/predictions/?upcoming=true"
+const BSD_TOKEN = process.env.BSD_TOKEN
 
 // ── BSD: fetch all pages ──────────────────
 
@@ -73,108 +35,12 @@ async function fetchAllPages() {
   return all
 }
 
-// ── Claude: single analyst vote ───────────
-
-async function analystVote(prediction, personaKey) {
-  const persona = PERSONAS[personaKey]
-
-  const prompt = `
-Analyse this football match and decide if Over 2.5 & BTTS is a GOOD BET.
-
-Match:   ${prediction.match}
-League:  ${prediction.league}
-Kickoff: ${prediction.date} ${prediction.time}
-
-ML Model Probabilities:
-  Over 2.5 probability : ${(prediction.probability.over25 * 100).toFixed(1)}%
-  BTTS probability     : ${(prediction.probability.btts * 100).toFixed(1)}%
-  Combined score       : ${(prediction.probability.combo * 100).toFixed(1)}%
-
-Additional Model Data:
-  Predicted result     : ${prediction.predicted_result || "N/A"}
-  Most likely score    : ${prediction.most_likely_score || "N/A"}
-  Expected goals (home): ${prediction.xg_home ?? "N/A"}
-  Expected goals (away): ${prediction.xg_away ?? "N/A"}
-  Model confidence     : ${prediction.confidence != null ? (prediction.confidence * 100).toFixed(0) + "%" : "N/A"}
-
-You must respond ONLY with valid JSON — no preamble, no markdown, no explanation outside the JSON.
-Format:
-{
-  "vote": "YES" or "NO",
-  "reason": "one concise sentence explaining your decision"
-}
-`
-
-  const res = await axios.post(
-    "https://api.anthropic.com/v1/messages",
-    {
-      model:      CLAUDE_MODEL,
-      max_tokens: 120,
-      system:     persona.system,
-      messages:   [{ role: "user", content: prompt }]
-    },
-    {
-      headers: {
-        "x-api-key":         ANTHROPIC_KEY,
-        "anthropic-version": "2023-06-01",
-        "content-type":      "application/json"
-      }
-    }
-  )
-
-  const text  = res.data.content[0].text.trim()
-  const clean = text.replace(/```json|```/g, "").trim()
-
-  try {
-    return JSON.parse(clean)
-  } catch {
-    const voteMatch   = clean.match(/"vote"\s*:\s*"(YES|NO)"/i)
-    const reasonMatch = clean.match(/"reason"\s*:\s*"([^"]+)"/)
-    return {
-      vote:   voteMatch   ? voteMatch[1].toUpperCase() : "NO",
-      reason: reasonMatch ? reasonMatch[1] : "Parse error — defaulting to NO"
-    }
-  }
-}
-
-// ── Claude: run all 3 analysts in parallel ─
-
-async function runEnsemble(prediction) {
-  console.log(`  🔍 Analysing: ${prediction.match}`)
-
-  const [stats, form, value] = await Promise.all([
-    analystVote(prediction, "statistics"),
-    analystVote(prediction, "form"),
-    analystVote(prediction, "value")
-  ])
-
-  const consensus =
-    stats.vote === "YES" &&
-    form.vote  === "YES" &&
-    value.vote === "YES"
-
-  console.log(`    ${consensus ? "✅" : "❌"} Stats: ${stats.vote} | Form: ${form.vote} | Value: ${value.vote}`)
-
-  return {
-    ...prediction,
-    ai: {
-      consensus,
-      votes: { statistics: stats, form, value }
-    }
-  }
-}
-
 // ── Main ──────────────────────────────────
 
 async function run() {
   console.log("\n═══════════════════════════════")
   console.log("  AivsBookie Engine")
   console.log("═══════════════════════════════\n")
-
-  if (!ANTHROPIC_KEY) {
-    console.error("❌ ANTHROPIC_API_KEY is not set in .env")
-    process.exit(1)
-  }
 
   if (!BSD_TOKEN) {
     console.error("❌ BSD_TOKEN is not set in .env")
@@ -205,11 +71,12 @@ async function run() {
         match:             `${p.event?.home_team} vs ${p.event?.away_team}`,
         date:              kickoff.toLocaleDateString(),
         time:              kickoff.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        predicted_result:  p.predicted_result   || null,
-        most_likely_score: p.most_likely_score  || null,
+        predicted_result:  p.predicted_result    || null,
+        most_likely_score: p.most_likely_score   || null,
         xg_home:           p.expected_home_goals ?? null,
         xg_away:           p.expected_away_goals ?? null,
         confidence:        p.confidence          ?? null,
+        favorite_prob:     p.favorite_prob       ?? null,
         probability:       { over25: over, btts, combo },
         score:             combo
       })
@@ -218,15 +85,17 @@ async function run() {
     candidates.sort((a, b) => b.score - a.score)
     const top20 = candidates.slice(0, 20)
 
-    console.log(`🎯 ${candidates.length} games found → top ${top20.length} going to AI\n`)
-    console.log("🤖 Running AI ensemble (3 analysts per game)...\n")
+    console.log(`🎯 ${candidates.length} games found → analysing top ${top20.length}\n`)
+    console.log("🔍 Running local analyst ensemble...\n")
 
-    const results = []
-    for (const c of top20) {
-      const r = await runEnsemble(c)
-      results.push(r)
-      await new Promise(res => setTimeout(res, 300))
-    }
+    const results = top20.map(c => {
+      const r    = runEnsemble(c)
+      const icon = r.ai.consensus ? "✅" : "❌"
+      const v    = r.ai.votes
+      console.log(`  ${icon} ${c.match}`)
+      console.log(`     Stats: ${v.statistics.vote} | Form: ${v.form.vote} | Value: ${v.value.vote}`)
+      return r
+    })
 
     const confirmed = results.filter(r => r.ai.consensus)
 
