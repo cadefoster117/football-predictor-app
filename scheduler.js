@@ -4,7 +4,7 @@ const { exec } = require("child_process")
 console.log("Scheduler started")
 
 /* RUN EVERY DAY AT 00:00 */
-cron.schedule("0 0 * * *", () => {
+cron.schedule("9 30 * * *", () => {
 
  console.log("Daily scan started")
 
