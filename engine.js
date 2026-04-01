@@ -1,64 +1,43 @@
 const fs=require("fs")
-const {getTodayMatches,getLeagueTable}=require("./api")
-const {matchProb}=require("./poisson")
+const axios=require("axios")
 
-function findTeam(table,name){
+const API="https://sports.bzzoiro.com/api/predictions/?upcoming=true"
 
- const n=name.toLowerCase()
-
- return table.find(t=>
-  t.strTeam.toLowerCase().includes(n) ||
-  n.includes(t.strTeam.toLowerCase())
- )
-
-}
+const TOKEN="c856e7f4def835bb1b2e448e6ccda8b47ed188ac"
 
 async function run(){
 
- const matches=await getTodayMatches()
+ const res=await axios.get(API,{
+  headers:{
+   Authorization:`Token ${TOKEN}`
+  }
+ })
+
+ const data=res.data.results
 
  const predictions=[]
 
- let scanned=0
+ for(const p of data){
 
- for(const m of matches){
+  const over=p.prob_over_25/100
+  const btts=p.prob_btts_yes/100
 
-  scanned++
-
-  if(!m.idLeague) continue
-
-  const table=await getLeagueTable(m.idLeague)
-
-  if(!table.length) continue
-
-  const home=findTeam(table,m.strHomeTeam)
-  const away=findTeam(table,m.strAwayTeam)
-
-  if(!home || !away) continue
-
-  const hp=parseInt(home.intPlayed)
-  const ap=parseInt(away.intPlayed)
-
-  if(!hp || !ap) continue
-
-  const homeAttack=home.intGoalsFor/hp
-  const homeDefense=home.intGoalsAgainst/hp
-
-  const awayAttack=away.intGoalsFor/ap
-  const awayDefense=away.intGoalsAgainst/ap
-
-  const homeXG=(homeAttack+awayDefense)/2
-  const awayXG=(awayAttack+homeDefense)/2
-
-  const probs=matchProb(homeXG,awayXG)
+  const combo=over*btts
 
   predictions.push({
 
-   league:m.strLeague,
-   match:m.strHomeTeam+" vs "+m.strAwayTeam,
+   league:p.event.league || "Unknown",
+   match:p.event.home_team+" vs "+p.event.away_team,
    prediction:"Over2.5 & BTTS",
-   probability:probs,
-   score:probs.combo
+
+   probability:{
+    over25:over,
+    btts:btts,
+    combo:combo
+   },
+
+   confidence:p.confidence,
+   score:combo
 
   })
 
@@ -70,8 +49,9 @@ async function run(){
 
  const output={
 
+  engine:"BSD ML v4",
   last_scan:new Date().toISOString(),
-  games_scanned:scanned,
+  games_scanned:data.length,
   predictions:top
 
  }
@@ -81,8 +61,8 @@ async function run(){
   JSON.stringify(output,null,2)
  )
 
- console.log("Scan finished")
- console.log("Games scanned:",scanned)
+ console.log("Games scanned:",data.length)
+ console.log("Top predictions:",top.length)
 
 }
 
