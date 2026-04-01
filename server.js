@@ -4,9 +4,9 @@
 
 require("dotenv").config()
 
-const express = require("express")
-const fs      = require("fs")
-const path    = require("path")
+const express  = require("express")
+const fs       = require("fs")
+const path     = require("path")
 const { exec } = require("child_process")
 
 require("./scheduler")
@@ -36,7 +36,7 @@ app.get("/predictions", (req, res) => {
     res.json(JSON.parse(data))
   } catch {
     res.json({
-      last_scan:     null,
+      last_scan:    null,
       games_scanned: 0,
       candidates:    0,
       ai_confirmed:  0,
@@ -45,7 +45,7 @@ app.get("/predictions", (req, res) => {
   }
 })
 
-// ── Manual trigger (for testing) ──────────
+// ── Manual trigger ────────────────────────
 
 app.get("/run-engine", (req, res) => {
   console.log("Manual engine trigger...")
@@ -59,11 +59,9 @@ app.get("/run-engine", (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`)
-
-  // Run engine on startup
   console.log("Running first scan...")
   exec("node engine.js", (err, stdout) => {
     if (err) console.error("Scan error:", err.message)
-    else     console.log("First scan finished\n" + stdout)
+    else     console.log(stdout)
   })
 })
