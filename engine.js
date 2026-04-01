@@ -239,7 +239,7 @@ async function run() {
     }
 
     fs.writeFileSync(
-      "predictions.json",
+      "public/predictions.json",
       JSON.stringify(output, null, 2)
     )
 
