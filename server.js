@@ -1,9 +1,23 @@
 const express=require("express")
 const fs=require("fs")
+const {exec}=require("child_process")
 
 require("./scheduler")
 
 const app=express()
+
+/* RUN SCAN ON START */
+console.log("Running first scan...")
+
+exec("node engine.js",(err)=>{
+
+ if(err){
+  console.log("Scan error:",err)
+ }else{
+  console.log("First scan finished")
+ }
+
+})
 
 app.get("/",(req,res)=>{
 
