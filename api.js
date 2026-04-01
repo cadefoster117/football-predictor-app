@@ -2,15 +2,41 @@ const axios=require("axios")
 
 const API="https://www.thesportsdb.com/api/v1/json/3"
 
-async function getTodayMatches(){
+function formatDate(d){
 
- const today=new Date().toISOString().slice(0,10)
+ return d.toISOString().slice(0,10)
+
+}
+
+async function getMatchesForDate(date){
 
  const res=await axios.get(
- `${API}/eventsday.php?d=${today}&s=Soccer`
+ `${API}/eventsday.php?d=${date}&s=Soccer`
  )
 
  return res.data.events||[]
+
+}
+
+async function getTodayMatches(){
+
+ const today=new Date()
+
+ const yesterday=new Date(today)
+ yesterday.setDate(today.getDate()-1)
+
+ const tomorrow=new Date(today)
+ tomorrow.setDate(today.getDate()+1)
+
+ const matches=[
+
+  ...(await getMatchesForDate(formatDate(yesterday))),
+  ...(await getMatchesForDate(formatDate(today))),
+  ...(await getMatchesForDate(formatDate(tomorrow)))
+
+ ]
+
+ return matches
 
 }
 
