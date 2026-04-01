@@ -202,8 +202,8 @@ async function init() {
   const accaSection = document.getElementById("acca-section")
 
   try {
-    const res  = await fetch("predictions.json?t=" + Date.now())
-
+    const res = await fetch("/predictions")
+    
     if (!res.ok) throw new Error("predictions.json not found — run engine.js first")
 
     const data = await res.json()
