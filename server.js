@@ -1,55 +1,60 @@
-const express=require("express")
-const fs=require("fs")
-const {exec}=require("child_process")
+const express = require("express")
+const fs = require("fs")
+const path = require("path")
+const { exec } = require("child_process")
 
 require("./scheduler")
 
-const app=express()
+const app = express()
+
+/* SERVE WEBAPP */
+app.use(express.static(path.join(__dirname, "public")))
 
 /* RUN SCAN ON START */
 console.log("Running first scan...")
 
-exec("node engine.js",(err)=>{
+exec("node engine.js", (err) => {
 
- if(err){
-  console.log("Scan error:",err)
- }else{
+ if (err) {
+  console.log("Scan error:", err)
+ } else {
   console.log("First scan finished")
  }
 
 })
 
-app.get("/",(req,res)=>{
+/* MAIN PAGE */
+app.get("/", (req, res) => {
 
- res.send("Football Prediction API Running")
+ res.sendFile(path.join(__dirname, "public/index.html"))
 
 })
 
-app.get("/predictions",(req,res)=>{
+/* API ENDPOINT */
+app.get("/predictions", (req, res) => {
 
- try{
+ try {
 
-  const data=
-  fs.readFileSync("predictions.json")
+  const data = fs.readFileSync("predictions.json")
 
   res.json(JSON.parse(data))
 
- }catch{
+ } catch {
 
   res.json({
-   last_scan:null,
-   games_scanned:0,
-   predictions:[]
+   last_scan: null,
+   games_scanned: 0,
+   predictions: []
   })
 
  }
 
 })
 
-const PORT=process.env.PORT||3000
+const PORT = process.env.PORT || 3000
 
-app.listen(PORT,()=>{
+app.listen(PORT, () => {
 
- console.log("Server running on",PORT)
+ console.log("Server running on", PORT)
 
 })
