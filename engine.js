@@ -1,8 +1,5 @@
 // ══════════════════════════════════════════
 //  AivsBookie — engine.js
-//  Run: node engine.js
-//
-//  Uses local analysts.js — no API needed.
 // ══════════════════════════════════════════
 
 require("dotenv").config()
@@ -14,7 +11,7 @@ const { runEnsemble } = require("./analysts")
 const BSD_API   = "https://sports.bzzoiro.com/api/predictions/?upcoming=true"
 const BSD_TOKEN = process.env.BSD_TOKEN
 
-// ── BSD: fetch all pages ──────────────────
+// ── Fetch all BSD pages ───────────────────
 
 async function fetchAllPages() {
   const all = []
@@ -52,9 +49,9 @@ async function run() {
     const raw = await fetchAllPages()
     console.log(`   ${raw.length} total predictions fetched\n`)
 
-    // 48h window handles BSD's Dubai timezone offset
+    // Next 24 hours only
     const now    = new Date()
-    const next48 = new Date(now.getTime() + 48 * 60 * 60 * 1000)
+    const next24 = new Date(now.getTime() + 24 * 60 * 60 * 1000)
 
     const candidates = []
 
@@ -64,7 +61,7 @@ async function run() {
       const combo = over * btts
 
       const kickoff = p.event?.event_date ? new Date(p.event.event_date) : null
-      if (!kickoff || kickoff > next48) continue
+      if (!kickoff || kickoff < now || kickoff > next24) continue
 
       candidates.push({
         league:            p.event?.league?.name || "Unknown",
@@ -85,14 +82,13 @@ async function run() {
     candidates.sort((a, b) => b.score - a.score)
     const top20 = candidates.slice(0, 20)
 
-    console.log(`🎯 ${candidates.length} games found → analysing top ${top20.length}\n`)
-    console.log("🔍 Running local analyst ensemble...\n")
+    console.log(`🎯 ${candidates.length} games in next 24h → analysing top ${top20.length}\n`)
+    console.log("🔍 Running analyst ensemble...\n")
 
     const results = top20.map(c => {
-      const r    = runEnsemble(c)
-      const icon = r.ai.consensus ? "✅" : "❌"
-      const v    = r.ai.votes
-      console.log(`  ${icon} ${c.match}`)
+      const r = runEnsemble(c)
+      const v = r.ai.votes
+      console.log(`  ${r.ai.consensus ? "✅" : "❌"} ${c.match}`)
       console.log(`     Stats: ${v.statistics.vote} | Form: ${v.form.vote} | Value: ${v.value.vote}`)
       return r
     })
