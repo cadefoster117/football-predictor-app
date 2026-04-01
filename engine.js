@@ -24,12 +24,19 @@ async function run(){
 
   const combo=over*btts
 
-  predictions.push({
+  const kickoff = new Date(p.event.start_time)
 
-   league:p.event.league || "Unknown",
-   match:p.event.home_team+" vs "+p.event.away_team,
-   prediction:"Over2.5 & BTTS",
+predictions.push({
 
+ league: p.event.league?.name || "Unknown",
+
+ match: p.event.home_team+" vs "+p.event.away_team,
+
+ date: kickoff.toLocaleDateString(),
+
+ time: kickoff.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}),
+
+ prediction:"Over2.5 & BTTS",
    probability:{
     over25:over,
     btts:btts,
