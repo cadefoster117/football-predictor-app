@@ -1,10 +1,23 @@
-const cron=require("node-cron")
-const {exec}=require("child_process")
+const cron = require("node-cron")
+const { exec } = require("child_process")
 
-cron.schedule("0 6 * * *",()=>{
+console.log("Scheduler started")
 
- console.log("Updating predictions")
+/* RUN EVERY DAY AT 00:00 */
+cron.schedule("0 0 * * *", () => {
 
- exec("node engine.js")
+ console.log("Daily scan started")
 
+ exec("node engine.js", (err) => {
+
+  if (err) {
+   console.log("Scan error:", err)
+  } else {
+   console.log("Daily scan finished")
+  }
+
+ })
+
+},{
+ timezone: "Europe/Sofia"
 })
