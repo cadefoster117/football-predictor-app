@@ -1,23 +1,24 @@
-const cron = require("node-cron")
+// ══════════════════════════════════════════
+//  AivsBookie — scheduler.js
+//  Runs engine every 6 hours
+// ══════════════════════════════════════════
+
 const { exec } = require("child_process")
 
-console.log("Scheduler started")
+const INTERVAL_MS = 6 * 60 * 60 * 1000  // 6 hours
 
-/* RUN EVERY DAY AT 00:00 */
-cron.schedule("0 0 * * *", () => {
+function scan() {
+  console.log(`[Scheduler] Running scan at ${new Date().toISOString()}`)
+  exec("node engine.js", (err, stdout) => {
+    if (err) console.error("[Scheduler] Scan error:", err.message)
+    else     console.log("[Scheduler] Scan complete\n" + stdout)
+  })
+}
 
- console.log("Daily scan started")
+// Start recurring scans after first boot scan in server.js
+setTimeout(() => {
+  scan()
+  setInterval(scan, INTERVAL_MS)
+}, INTERVAL_MS)
 
- exec("node engine.js", (err) => {
-
-  if (err) {
-   console.log("Scan error:", err)
-  } else {
-   console.log("Daily scan finished")
-  }
-
- })
-
-},{
- timezone: "Europe/Sofia"
-})
+console.log("Scheduler started — scanning every 6 hours")
