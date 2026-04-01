@@ -7,15 +7,16 @@
 //  3. Sends top 20 candidates to Claude with 3
 //     different analyst personas (ensemble)
 //  4. Only keeps picks where ALL 3 vote YES
-//  5. Saves to predictions.json
+//  5. Saves to public/predictions.json
 // ══════════════════════════════════════════
+
+require("dotenv").config()
 
 const fs    = require("fs")
 const axios = require("axios")
 
-const BSD_API   = "https://sports.bzzoiro.com/api/predictions/?upcoming=true"
-const BSD_TOKEN = "c856e7f4def835bb1b2e448e6ccda8b47ed188ac"
-
+const BSD_API       = "https://sports.bzzoiro.com/api/predictions/?upcoming=true"
+const BSD_TOKEN     = process.env.BSD_TOKEN
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY
 const CLAUDE_MODEL  = "claude-sonnet-4-20250514"
 
@@ -127,11 +128,10 @@ Format:
   try {
     return JSON.parse(clean)
   } catch {
-    // Fallback if Claude returns slightly malformed JSON
     const voteMatch   = clean.match(/"vote"\s*:\s*"(YES|NO)"/i)
     const reasonMatch = clean.match(/"reason"\s*:\s*"([^"]+)"/)
     return {
-      vote:   voteMatch   ? voteMatch[1].toUpperCase()   : "NO",
+      vote:   voteMatch   ? voteMatch[1].toUpperCase() : "NO",
       reason: reasonMatch ? reasonMatch[1] : "Parse error — defaulting to NO"
     }
   }
@@ -153,18 +153,13 @@ async function runEnsemble(prediction) {
     form.vote  === "YES" &&
     value.vote === "YES"
 
-  const icon = consensus ? "✅" : "❌"
-  console.log(`    ${icon} Stats: ${stats.vote} | Form: ${form.vote} | Value: ${value.vote}`)
+  console.log(`    ${consensus ? "✅" : "❌"} Stats: ${stats.vote} | Form: ${form.vote} | Value: ${value.vote}`)
 
   return {
     ...prediction,
     ai: {
       consensus,
-      votes: {
-        statistics: stats,
-        form:       form,
-        value:      value
-      }
+      votes: { statistics: stats, form, value }
     }
   }
 }
@@ -176,15 +171,24 @@ async function run() {
   console.log("  AivsBookie Engine")
   console.log("═══════════════════════════════\n")
 
+  if (!ANTHROPIC_KEY) {
+    console.error("❌ ANTHROPIC_API_KEY is not set in .env")
+    process.exit(1)
+  }
+
+  if (!BSD_TOKEN) {
+    console.error("❌ BSD_TOKEN is not set in .env")
+    process.exit(1)
+  }
+
   try {
-    // 1. Fetch all games
     console.log("📡 Fetching games from BSD API...")
     const raw = await fetchAllPages()
     console.log(`   ${raw.length} total predictions fetched\n`)
 
-    // 2. Filter to next 24 hours and score
+    // 48h window handles BSD's Dubai timezone offset
     const now    = new Date()
-    const next24 = new Date(now.getTime() + 24 * 60 * 60 * 1000)
+    const next48 = new Date(now.getTime() + 48 * 60 * 60 * 1000)
 
     const candidates = []
 
@@ -194,7 +198,7 @@ async function run() {
       const combo = over * btts
 
       const kickoff = p.event?.event_date ? new Date(p.event.event_date) : null
-      if (!kickoff || kickoff < now || kickoff > next24) continue
+      if (!kickoff || kickoff > next48) continue
 
       candidates.push({
         league:            p.event?.league?.name || "Unknown",
@@ -211,31 +215,27 @@ async function run() {
       })
     }
 
-    // Sort by combo score, take top 20 as candidates
     candidates.sort((a, b) => b.score - a.score)
     const top20 = candidates.slice(0, 20)
 
-    console.log(`🎯 ${candidates.length} games in next 24h → top ${top20.length} going to AI\n`)
+    console.log(`🎯 ${candidates.length} games found → top ${top20.length} going to AI\n`)
     console.log("🤖 Running AI ensemble (3 analysts per game)...\n")
 
-    // 3. Run ensemble on all candidates
     const results = []
     for (const c of top20) {
       const r = await runEnsemble(c)
       results.push(r)
-      // Small delay to be kind to the API
       await new Promise(res => setTimeout(res, 300))
     }
 
     const confirmed = results.filter(r => r.ai.consensus)
 
-    // 4. Write predictions.json
     const output = {
       last_scan:     new Date().toISOString(),
       games_scanned: raw.length,
       candidates:    top20.length,
       ai_confirmed:  confirmed.length,
-      predictions:   results  // All results (confirmed + rejected) so frontend can show both
+      predictions:   results
     }
 
     fs.writeFileSync(
