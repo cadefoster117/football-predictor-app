@@ -16,7 +16,7 @@ const axios = require("axios")
 const BSD_API   = "https://sports.bzzoiro.com/api/predictions/?upcoming=true"
 const BSD_TOKEN = "c856e7f4def835bb1b2e448e6ccda8b47ed188ac"
 
-const ANTHROPIC_KEY = "YOUR_ANTHROPIC_KEY_HERE"
+const ANTHROPIC_KEY = "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"
 const CLAUDE_MODEL  = "claude-sonnet-4-20250514"
 
 // ── Analyst personas ──────────────────────
