@@ -20,9 +20,9 @@ app.use(express.static(path.join(__dirname, "public")))
 
 // ── Pages ─────────────────────────────────
 
-app.get("/",          (req, res) => res.sendFile(path.join(__dirname, "public/index.html")))
-app.get("/history",   (req, res) => res.sendFile(path.join(__dirname, "public/history.html")))
-app.get("/freewill",  (req, res) => res.sendFile(path.join(__dirname, "public/freewill.html")))
+app.get("/",         (req, res) => res.sendFile(path.join(__dirname, "public/index.html")))
+app.get("/history",  (req, res) => res.sendFile(path.join(__dirname, "public/history.html")))
+app.get("/freewill", (req, res) => res.sendFile(path.join(__dirname, "public/freewill.html")))
 
 // ── API: main predictions ─────────────────
 
@@ -57,7 +57,7 @@ app.get("/freewill-debate", (req, res) => {
   }
 })
 
-// ── Manual triggers ───────────────────────
+// ── Manual trigger: main engine ───────────
 
 app.get("/run-engine", (req, res) => {
   exec("node engine.js", (err, stdout, stderr) => {
@@ -66,6 +66,8 @@ app.get("/run-engine", (req, res) => {
   })
 })
 
+// ── Manual trigger: freewill models only ─
+
 app.get("/run-freewill", (req, res) => {
   exec("node freewill-engine.js", (err, stdout, stderr) => {
     if (err) return res.status(500).json({ error: err.message, stderr })
@@ -73,41 +75,75 @@ app.get("/run-freewill", (req, res) => {
   })
 })
 
+// ── Manual trigger: freewill models + debate
+
 app.get("/run-freewill-debate", (req, res) => {
-  // Runs both: models first, then debate
-  exec("node freewill-engine.js && node freewill-debate.js", (err, stdout, stderr) => {
-    if (err) return res.status(500).json({ error: err.message, stderr })
-    res.json({ ok: true, output: stdout })
+
+  // Step 1: always run models (no API key needed)
+  exec("node freewill-engine.js", (err1, stdout1) => {
+
+    if (err1) {
+      return res.status(500).json({
+        error: "freewill-engine failed: " + err1.message,
+        output: stdout1
+      })
+    }
+
+    // Step 2: only run debate if Anthropic key is available
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return res.json({
+        ok:     true,
+        output: stdout1,
+        note:   "ANTHROPIC_API_KEY not set — model scores updated, debate skipped"
+      })
+    }
+
+    exec("node freewill-debate.js", (err2, stdout2) => {
+      if (err2) {
+        return res.status(500).json({
+          error:  "freewill-debate failed: " + err2.message,
+          output: stdout1 + "\n" + stdout2
+        })
+      }
+      res.json({ ok: true, output: stdout1 + "\n" + stdout2 })
+    })
   })
 })
 
-// ── Start ─────────────────────────────────
+// ── Startup ───────────────────────────────
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`)
+function runOnStartup() {
 
-  // Run main engine on startup
-  console.log("Running main engine...")
+  // Always run main engine
+  console.log("▶ Running main engine...")
   exec("node engine.js", (err, stdout) => {
-    if (err) console.error("Main engine error:", err.message)
-    else console.log(stdout)
+    if (err) console.error("✗ Main engine:", err.message)
+    else     console.log(stdout)
   })
 
-  // Run freewill models on startup
-  console.log("Running FreeWill engine...")
+  // Always run freewill models (no API key needed)
+  console.log("▶ Running FreeWill models...")
   exec("node freewill-engine.js", (err, stdout) => {
-    if (err) console.error("FreeWill engine error:", err.message)
-    else console.log(stdout)
+    if (err) {
+      console.error("✗ FreeWill engine:", err.message)
+      return
+    }
+    console.log(stdout)
 
-    // Run debate after freewill models finish (needs freewill-predictions.json first)
+    // Only run debate if API key is present
     if (process.env.ANTHROPIC_API_KEY) {
-      console.log("Running FreeWill debate...")
+      console.log("▶ Running FreeWill debate...")
       exec("node freewill-debate.js", (err2, stdout2) => {
-        if (err2) console.error("Debate error:", err2.message)
-        else console.log(stdout2)
+        if (err2) console.error("✗ Debate engine:", err2.message)
+        else      console.log(stdout2)
       })
     } else {
-      console.log("⚠️  ANTHROPIC_API_KEY not set — skipping debate engine")
+      console.log("⚠ ANTHROPIC_API_KEY not set — debate skipped on startup")
     }
   })
+}
+
+app.listen(PORT, () => {
+  console.log(`\n✓ Server running on port ${PORT}`)
+  runOnStartup()
 })
