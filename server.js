@@ -152,99 +152,42 @@ app.get('/team-free-will', (req, res) => {
 
 app.get('/api/debate', async (req, res) => {
   try {
-    let predictions = [];
-    const fs = require('fs');
-
-    // 1. Try your current Free Will file first
-    const freeWillFile = './public/free-will-predictions.json';
-    const originalFile = './public/predictions.json';
-
-    if (fs.existsSync(freeWillFile)) {
-      const raw = fs.readFileSync(freeWillFile, 'utf8').trim();
-      if (raw) {
-        predictions = JSON.parse(raw);
-        console.log(`📂 Loaded ${predictions.length} matches from free-will-predictions.json`);
-      }
-    } 
-    // 2. Fallback to original engine file
-    else if (fs.existsSync(originalFile)) {
-      const raw = fs.readFileSync(originalFile, 'utf8').trim();
-      if (raw) {
-        predictions = JSON.parse(raw);
-        console.log(`📂 Loaded ${predictions.length} matches from predictions.json (fallback)`);
-      }
-    }
-
-    // Ensure we always have an array
-    if (!Array.isArray(predictions)) predictions = [];
-
-    if (predictions.length === 0) {
-      return res.json({
-        success: false,
-        message: "free-will-predictions.json is empty or missing.<br><br>Please run:<br><b>npm run update</b><br>or<br><b>node engine.js</b>"
-      });
-    }
-
-    // Filter next 24 hours
-    const now = Date.now();
-    const twentyFourHoursLater = now + 24 * 60 * 60 * 1000;
-
-    const candidates = predictions
-      .filter(p => {
-        if (!p?.date) return false;
-        try {
-          const matchTime = new Date(p.date).getTime();
-          return matchTime > now && matchTime < twentyFourHoursLater;
-        } catch (e) {
-          return false;
-        }
-      })
-      .slice(0, 8);
-
-    if (candidates.length === 0) {
-      return res.json({
-        success: false,
-        message: `Found ${predictions.length} total matches, but none are in the next 24 hours.<br><br>Run <b>npm run update</b> again to get fresh games.`
-      });
-    }
-
-    console.log(`🚀 Starting Team Free Will debate for ${candidates.length} matches`);
-
-    const debates = [];
-
-    const systemPrompt = `You are a professional football betting analyst specialized in Over 2.5 goals + Both Teams To Score (BTTS) combo bets.
-Analyze ONLY the provided data. Do not invent statistics.
-Respond strictly with valid JSON:
-{
-// === TEAM FREE WILL - 3 AI Debate (Gemini + DeepSeek + GPT) ===
-const { callLLM } = require('./llm-helper');
-
-app.get('/team-free-will', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'freewill.html'));
-});
-
-app.get('/api/debate', async (req, res) => {
-  try {
-    let data = [];
+    let debatesData = [];                     // ← consistent name
     const debateFile = path.join(__dirname, "public/freewill-debate.json");
 
     if (fs.existsSync(debateFile)) {
       const raw = fs.readFileSync(debateFile, 'utf8').trim();
-      if (raw) data = JSON.parse(raw);
-      console.log(`📂 Loaded ${data.length || 0} debates from freewill-debate.json`);
+      if (raw) {
+        debatesData = JSON.parse(raw);
+        console.log(`📂 Loaded ${debatesData.length} debates from freewill-debate.json`);
+      } else {
+        console.log('⚠ freewill-debate.json exists but is empty');
+      }
+    } else {
+      console.log('⚠ freewill-debate.json not found');
     }
 
-    if (!Array.isArray(data) || data.length === 0) {
+    if (!Array.isArray(debatesData) || debatesData.length === 0) {
       return res.json({
         success: false,
-        message: "freewill-debate.json is empty.<br>Run <b>npm run update</b> or <b>/run-freewill-debate</b> first."
+        message: "freewill-debate.json is empty or missing.<br><br>Please run the engine:<br><b>npm run update</b> or click <b>Run FreeWill Debate</b>"
       });
     }
 
-    res.json({ success: true, debates: data, count: data.length });
+    console.log(`🚀 Team Free Will loaded ${debatesData.length} debates successfully`);
+
+    res.json({ 
+      success: true, 
+      debates: debatesData, 
+      count: debatesData.length 
+    });
+
   } catch (error) {
-    console.error('Team Free Will error:', error);
-    res.status(500).json({ success: false, error: error.message });
+    console.error('Team Free Will /api/debate error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
   }
 });
 app.listen(PORT, () => {
