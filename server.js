@@ -142,7 +142,7 @@ function runOnStartup() {
   //  }
  // })
 }
-// === TEAM FREE WILL - 3 AI Debate (Gemini + DeepSeek + GPT) ===
+// === TEAM FREE WILL - 3 AI Debate ===
 const { callLLM } = require('./llm-helper');
 
 app.get('/team-free-will', (req, res) => {
@@ -153,76 +153,75 @@ app.get('/api/debate', async (req, res) => {
   try {
     let predictions = [];
 
-    // Safe loading of predictions.json
-    try {
-      const fs = require('fs');
-      const filePath = './public/predictions.json';
-      
-      if (fs.existsSync(filePath)) {
-        const rawData = fs.readFileSync(filePath, 'utf8').trim();
-        if (rawData) {
-          predictions = JSON.parse(rawData);
-          
-          // Ensure it's always an array
-          if (!Array.isArray(predictions)) {
-            console.warn('predictions.json is not an array, resetting to empty');
-            predictions = [];
-          }
-        }
-      } else {
-        console.warn('predictions.json not found — using empty list');
+    // Safe load predictions.json
+    const fs = require('fs');
+    const filePath = './public/predictions.json';
+
+    if (fs.existsSync(filePath)) {
+      const raw = fs.readFileSync(filePath, 'utf8').trim();
+      if (raw) {
+        predictions = JSON.parse(raw);
+        if (!Array.isArray(predictions)) predictions = [];
       }
-    } catch (parseError) {
-      console.error('Error reading predictions.json:', parseError.message);
-      predictions = [];
     }
 
-    // Filter matches in next 24 hours (safe check)
+    if (predictions.length === 0) {
+      return res.json({
+        success: false,
+        message: "predictions.json is empty or missing. Please run the engine first (npm run update)"
+      });
+    }
+
     const now = Date.now();
     const twentyFourHoursLater = now + 24 * 60 * 60 * 1000;
 
     const candidates = predictions
       .filter(p => {
-        if (!p || !p.date) return false;
-        const matchDate = new Date(p.date).getTime();
-        return matchDate > now && matchDate < twentyFourHoursLater;
+        if (!p?.date) return false;
+        try {
+          const matchTime = new Date(p.date).getTime();
+          return matchTime > now && matchTime < twentyFourHoursLater;
+        } catch (e) {
+          return false;
+        }
       })
-      .slice(0, 8);   // limit to max 8 matches to control cost
+      .slice(0, 8);
 
     if (candidates.length === 0) {
-      return res.json({ 
-        success: false, 
-        message: "No matches found in the next 24 hours. Run the engine first." 
+      return res.json({
+        success: false,
+        message: `Found ${predictions.length} total predictions, but none in the next 24 hours.<br><br>Try running the engine again (npm run update)`,
+        totalPredictions: predictions.length
       });
     }
 
-    console.log(`🔍 Starting Team Free Will debate for ${candidates.length} matches`);
+    console.log(`🎯 Starting Team Free Will debate for ${candidates.length} matches`);
+
+    // ... (rest of the debate logic stays the same as my previous version)
 
     const debates = [];
 
     const systemPrompt = `You are a professional football betting analyst specialized in Over 2.5 goals + Both Teams To Score (BTTS) combo bets.
 Analyze ONLY the provided data. Do not invent statistics.
-Respond strictly with valid JSON in this exact format:
+Respond strictly with valid JSON:
 {
-  "vote": "YES" or "NO" or "MAYBE",
-  "confidence": number between 0 and 100,
-  "reason": "clear and concise explanation (maximum 3 sentences)"
+  "vote": "YES"|"NO"|"MAYBE",
+  "confidence": number 0-100,
+  "reason": "clear explanation, max 3 sentences"
 }`;
 
     for (const match of candidates) {
       const context = `
-Match: ${match.home || 'Unknown'} vs ${match.away || 'Unknown'}
+Match: ${match.home || '?'} vs ${match.away || '?'}
 League: ${match.league || 'Unknown'}
-Date: ${match.date || 'N/A'}
 Prob Over 2.5: ${match.prob_over25 || 0}%
 Prob BTTS: ${match.prob_btts || 0}%
-Combo Prob: ${match.prob_combo || 0}%
-xG Home: ${match.xg_home || 'N/A'} | xG Away: ${match.xg_away || 'N/A'}
+Combo: ${match.prob_combo || 0}%
+xG Home: ${match.xg_home || 'N/A'} | Away: ${match.xg_away || 'N/A'}
       `.trim();
 
-      const userPrompt = `Analyze this match for Over 2.5 + BTTS combo bet:\n${context}`;
+      const userPrompt = `Analyze for Over 2.5 + BTTS:\n${context}`;
 
-      // Call the 3 models in parallel
       const [geminiRes, deepseekRes, gptRes] = await Promise.all([
         callLLM('gemini', systemPrompt, userPrompt).catch(() => ({vote:"ERROR", confidence:0, reason:"Failed"})),
         callLLM('deepseek', systemPrompt, userPrompt).catch(() => ({vote:"ERROR", confidence:0, reason:"Failed"})),
@@ -231,12 +230,11 @@ xG Home: ${match.xg_home || 'N/A'} | xG Away: ${match.xg_away || 'N/A'}
 
       const allVotes = [geminiRes, deepseekRes, gptRes];
       const yesCount = allVotes.filter(v => v.vote === "YES").length;
-      const avgConfidence = Math.round(allVotes.reduce((sum, v) => sum + (v.confidence || 0), 0) / 3);
+      const avgConfidence = Math.round(allVotes.reduce((s, v) => s + (v.confidence || 0), 0) / 3);
 
       debates.push({
         match: `${match.home || '?'} vs ${match.away || '?'}`,
         date: match.date,
-        data: match,
         gemini: geminiRes,
         deepseek: deepseekRes,
         gpt: gptRes,
@@ -248,27 +246,15 @@ xG Home: ${match.xg_home || 'N/A'} | xG Away: ${match.xg_away || 'N/A'}
       });
     }
 
-    // Save results
-    const fs = require('fs');
     fs.writeFileSync('./public/debates.json', JSON.stringify(debates, null, 2));
 
-    res.json({ 
-      success: true, 
-      debates, 
-      count: debates.length,
-      note: `Debated ${debates.length} matches`
-    });
+    res.json({ success: true, debates, count: debates.length });
 
   } catch (error) {
-    console.error('Team Free Will error:', error.message);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message,
-      note: "Check server logs for details"
-    });
+    console.error('Debate error:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
-
 app.listen(PORT, () => {
   console.log(`\n✓ Server running on port ${PORT}`)
   runOnStartup()
