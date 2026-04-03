@@ -142,62 +142,7 @@ function runOnStartup() {
   //  }
  // })
 }
-// === TEAM FREE WILL - 3 AI Debate ===
-const { callLLM } = require('./llm-helper');
 
-app.get('/team-free-will', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'freewill.html'));
-});
-
-app.get('/api/debate', async (req, res) => {
-  try {
-    let predictions = [];
-
-    // Safe load predictions.json
-    const fs = require('fs');
-    const filePath = './public/freewill-predictions.json';
-
-    if (fs.existsSync(filePath)) {
-      const raw = fs.readFileSync(filePath, 'utf8').trim();
-      if (raw) {
-        predictions = JSON.parse(raw);
-        if (!Array.isArray(predictions)) predictions = [];
-      }
-    }
-
-    if (predictions.length === 0) {
-      return res.json({
-        success: false,
-        message: "freewill-predictions.json is empty or missing. Please run the engine first (npm run update)"
-      });
-    }
-
-    const now = Date.now();
-    const twentyFourHoursLater = now + 24 * 60 * 60 * 1000;
-
-    const candidates = predictions
-      .filter(p => {
-        if (!p?.date) return false;
-        try {
-          const matchTime = new Date(p.date).getTime();
-          return matchTime > now && matchTime < twentyFourHoursLater;
-        } catch (e) {
-          return false;
-        }
-      })
-      .slice(0, 8);
-
-    if (candidates.length === 0) {
-      return res.json({
-        success: false,
-        message: `Found ${predictions.length} total predictions, but none in the next 24 hours.<br><br>Try running the engine again (npm run update)`,
-        totalPredictions: predictions.length
-      });
-    }
-
-    console.log(`🎯 Starting Team Free Will debate for ${candidates.length} matches`);
-
-    // ... (rest of the debate logic stays the same as my previous version)
 // === TEAM FREE WILL - 3 AI Debate (Gemini + DeepSeek + GPT) ===
 const { callLLM } = require('./llm-helper');
 
