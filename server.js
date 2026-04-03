@@ -155,7 +155,7 @@ app.get('/api/debate', async (req, res) => {
 
     // Safe load predictions.json
     const fs = require('fs');
-    const filePath = './public/predictions.json';
+    const filePath = './public/freewill-predictions.json';
 
     if (fs.existsSync(filePath)) {
       const raw = fs.readFileSync(filePath, 'utf8').trim();
@@ -168,7 +168,7 @@ app.get('/api/debate', async (req, res) => {
     if (predictions.length === 0) {
       return res.json({
         success: false,
-        message: "predictions.json is empty or missing. Please run the engine first (npm run update)"
+        message: "freewill-predictions.json is empty or missing. Please run the engine first (npm run update)"
       });
     }
 
