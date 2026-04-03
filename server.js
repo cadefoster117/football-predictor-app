@@ -109,18 +109,11 @@ app.get("/run-freewill-debate", (req, res) => {
     })
   })
 })
-// === TEAM FREE WILL ROUTES (add this block) ===
+// === TEAM FREE WILL ROUTE (3 models: Gemini, DeepSeek, GPT) ===
 const { callLLM } = require('./llm-helper');
 
-// GET the Team Free Will page
-app.get('/team-free-will', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'freewill.html'));
-});
-
-// API endpoint to run debate
 app.get('/api/debate', async (req, res) => {
   try {
-    // Load latest predictions (your existing ones)
     let predictions = [];
     try {
       predictions = require('./public/predictions.json');
@@ -128,7 +121,7 @@ app.get('/api/debate', async (req, res) => {
       predictions = [];
     }
 
-    // Take only next 24h + top candidates (limit to 8 to control cost)
+    // Take top 8 candidates in next 24h
     const candidates = predictions
       .filter(p => new Date(p.date) > Date.now() && new Date(p.date) < Date.now() + 24*60*60*1000)
       .slice(0, 8);
@@ -139,64 +132,62 @@ app.get('/api/debate', async (req, res) => {
 
     const debates = [];
 
+    const systemPrompt = `You are a professional football betting analyst specialized in Over 2.5 goals + Both Teams To Score (BTTS) combo bets.
+Analyze ONLY the provided data. Do not invent any statistics.
+Respond with valid JSON only in this exact format:
+{
+  "vote": "YES" or "NO" or "MAYBE",
+  "confidence": number between 0 and 100,
+  "reason": "clear and concise explanation (maximum 3 sentences)"
+}`;
+
     for (const match of candidates) {
       const context = `
 Match: ${match.home} vs ${match.away}
 League: ${match.league || 'Unknown'}
 Date: ${match.date}
-Prob Over 2.5: ${match.prob_over25}%
-Prob BTTS: ${match.prob_btts}%
-Combo Prob: ${match.prob_combo}%
-xG Home: ${match.xg_home || 'N/A'}, xG Away: ${match.xg_away || 'N/A'}
-Your analysts votes: ${JSON.stringify(match.analysts || {})}
+Prob Over 2.5: ${match.prob_over25 || 0}%
+Prob BTTS: ${match.prob_btts || 0}%
+Combo: ${match.prob_combo || 0}%
+xG Home: ${match.xg_home || 'N/A'} | xG Away: ${match.xg_away || 'N/A'}
+Analysts votes: ${JSON.stringify(match.analysts || {})}
       `.trim();
-
-      const systemPrompt = `You are a professional soccer betting expert specialized in Over 2.5 goals + Both Teams To Score (BTTS) bets.
-Analyze ONLY the provided data. Do not invent statistics.
-Output strictly valid JSON with this structure:
-{
-  "vote": "YES" or "NO" or "MAYBE",
-  "confidence": number between 0 and 100,
-  "reason": "short clear explanation (2-4 sentences max)"
-}`;
 
       const userPrompt = `Analyze this match for Over 2.5 + BTTS combo:\n${context}`;
 
-      // Call all 4 models in parallel
-      const [geminiRes, claudeRes, deepseekRes, gptRes] = await Promise.all([
+      // Call 3 models in parallel
+      const [geminiRes, deepseekRes, gptRes] = await Promise.all([
         callLLM('gemini', systemPrompt, userPrompt),
-        callLLM('claude', systemPrompt, userPrompt),
         callLLM('deepseek', systemPrompt, userPrompt),
         callLLM('gpt', systemPrompt, userPrompt)
       ]);
 
-      const allVotes = [geminiRes, claudeRes, deepseekRes, gptRes];
+      const allVotes = [geminiRes, deepseekRes, gptRes];
       const yesCount = allVotes.filter(v => v.vote === "YES").length;
-      const avgConfidence = allVotes.reduce((sum, v) => sum + (v.confidence || 0), 0) / 4;
+      const avgConfidence = Math.round(allVotes.reduce((sum, v) => sum + (v.confidence || 0), 0) / 3);
 
       debates.push({
         match: `${match.home} vs ${match.away}`,
         date: match.date,
         data: match,
         gemini: geminiRes,
-        claude: claudeRes,
         deepseek: deepseekRes,
         gpt: gptRes,
         consensus: {
-          yesCount: yesCount,
-          avgConfidence: Math.round(avgConfidence),
-          strength: yesCount >= 3 ? "STRONG" : yesCount >= 2 ? "MODERATE" : "WEAK"
+          yesCount,
+          avgConfidence,
+          strength: yesCount >= 2 ? "STRONG" : yesCount === 1 ? "MODERATE" : "WEAK"
         }
       });
     }
 
-    // Save to public for the frontend
+    // Save for frontend
     const fs = require('fs');
     fs.writeFileSync('./public/debates.json', JSON.stringify(debates, null, 2));
 
     res.json({ success: true, debates, count: debates.length });
   } catch (error) {
-    console.error(error);
+    console.error('Debate error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
