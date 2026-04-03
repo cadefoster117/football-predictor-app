@@ -122,25 +122,25 @@ function runOnStartup() {
   })
 
   // Always run freewill models (no API key needed)
-  console.log("▶ Running FreeWill models...")
-  exec("node freewill-engine.js", (err, stdout) => {
-    if (err) {
-      console.error("✗ FreeWill engine:", err.message)
-      return
-    }
-    console.log(stdout)
+ // console.log("▶ Running FreeWill models...")
+//  exec("node freewill-engine.js", (err, stdout) => {
+   // if (err) {
+   //   console.error("✗ FreeWill engine:", err.message)
+   //   return
+ //   }
+   // console.log(stdout)
 
     // Only run debate if API key is present
-    if (process.env.ANTHROPIC_API_KEY) {
-      console.log("▶ Running FreeWill debate...")
-      exec("node freewill-debate.js", (err2, stdout2) => {
-        if (err2) console.error("✗ Debate engine:", err2.message)
-        else      console.log(stdout2)
-      })
-    } else {
-      console.log("⚠ ANTHROPIC_API_KEY not set — debate skipped on startup")
-    }
-  })
+//    if (process.env.ANTHROPIC_API_KEY) {
+   //   console.log("▶ Running FreeWill debate...")
+    //  exec("node freewill-debate.js", (err2, stdout2) => {
+    //    if (err2) console.error("✗ Debate engine:", err2.message)
+    //    else      console.log(stdout2)
+   //   })
+ //   } else {
+  //    console.log("⚠ ANTHROPIC_API_KEY not set — debate skipped on startup")
+  //  }
+ // })
 }
 // === TEAM FREE WILL - 3 AI Debate (Gemini + DeepSeek + GPT) ===
 const { callLLM } = require('./llm-helper');
