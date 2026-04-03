@@ -109,88 +109,7 @@ app.get("/run-freewill-debate", (req, res) => {
     })
   })
 })
-// === TEAM FREE WILL ROUTE (3 models: Gemini, DeepSeek, GPT) ===
-const { callLLM } = require('./llm-helper');
 
-app.get('/api/debate', async (req, res) => {
-  try {
-    let predictions = [];
-    try {
-      predictions = require('./public/predictions.json');
-    } catch (e) {
-      predictions = [];
-    }
-
-    // Take top 8 candidates in next 24h
-    const candidates = predictions
-      .filter(p => new Date(p.date) > Date.now() && new Date(p.date) < Date.now() + 24*60*60*1000)
-      .slice(0, 8);
-
-    if (candidates.length === 0) {
-      return res.json({ success: false, message: "No matches in next 24 hours" });
-    }
-
-    const debates = [];
-
-    const systemPrompt = `You are a professional football betting analyst specialized in Over 2.5 goals + Both Teams To Score (BTTS) combo bets.
-Analyze ONLY the provided data. Do not invent any statistics.
-Respond with valid JSON only in this exact format:
-{
-  "vote": "YES" or "NO" or "MAYBE",
-  "confidence": number between 0 and 100,
-  "reason": "clear and concise explanation (maximum 3 sentences)"
-}`;
-
-    for (const match of candidates) {
-      const context = `
-Match: ${match.home} vs ${match.away}
-League: ${match.league || 'Unknown'}
-Date: ${match.date}
-Prob Over 2.5: ${match.prob_over25 || 0}%
-Prob BTTS: ${match.prob_btts || 0}%
-Combo: ${match.prob_combo || 0}%
-xG Home: ${match.xg_home || 'N/A'} | xG Away: ${match.xg_away || 'N/A'}
-Analysts votes: ${JSON.stringify(match.analysts || {})}
-      `.trim();
-
-      const userPrompt = `Analyze this match for Over 2.5 + BTTS combo:\n${context}`;
-
-      // Call 3 models in parallel
-      const [geminiRes, deepseekRes, gptRes] = await Promise.all([
-        callLLM('gemini', systemPrompt, userPrompt),
-        callLLM('deepseek', systemPrompt, userPrompt),
-        callLLM('gpt', systemPrompt, userPrompt)
-      ]);
-
-      const allVotes = [geminiRes, deepseekRes, gptRes];
-      const yesCount = allVotes.filter(v => v.vote === "YES").length;
-      const avgConfidence = Math.round(allVotes.reduce((sum, v) => sum + (v.confidence || 0), 0) / 3);
-
-      debates.push({
-        match: `${match.home} vs ${match.away}`,
-        date: match.date,
-        data: match,
-        gemini: geminiRes,
-        deepseek: deepseekRes,
-        gpt: gptRes,
-        consensus: {
-          yesCount,
-          avgConfidence,
-          strength: yesCount >= 2 ? "STRONG" : yesCount === 1 ? "MODERATE" : "WEAK"
-        }
-      });
-    }
-
-    // Save for frontend
-    const fs = require('fs');
-    fs.writeFileSync('./public/debates.json', JSON.stringify(debates, null, 2));
-
-    res.json({ success: true, debates, count: debates.length });
-  } catch (error) {
-    console.error('Debate error:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
 // ── Startup ───────────────────────────────
 
 function runOnStartup() {
@@ -223,6 +142,85 @@ function runOnStartup() {
     }
   })
 }
+// === TEAM FREE WILL - 3 AI Debate (Gemini + DeepSeek + GPT) ===
+const { callLLM } = require('./llm-helper');
+
+app.get('/team-free-will', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'freewill.html'));
+});
+
+app.get('/api/debate', async (req, res) => {
+  try {
+    let predictions = [];
+    try {
+      predictions = require('./public/predictions.json');
+    } catch (e) {}
+
+    const candidates = predictions
+      .filter(p => new Date(p.date) > Date.now() && new Date(p.date) < Date.now() + 24*60*60*1000)
+      .slice(0, 8);
+
+    if (candidates.length === 0) {
+      return res.json({ success: false, message: "No matches in next 24 hours" });
+    }
+
+    const debates = [];
+
+    const systemPrompt = `You are a professional football betting analyst specialized in Over 2.5 goals + Both Teams To Score (BTTS) combo bets.
+Analyze ONLY the provided data. Do not invent statistics.
+Respond strictly with valid JSON in this format:
+{
+  "vote": "YES" or "NO" or "MAYBE",
+  "confidence": number 0-100,
+  "reason": "clear explanation, max 3 sentences"
+}`;
+
+    for (const match of candidates) {
+      const context = `
+Match: ${match.home} vs ${match.away}
+League: ${match.league || 'Unknown'}
+Prob Over 2.5: ${match.prob_over25 || 0}%
+Prob BTTS: ${match.prob_btts || 0}%
+Combo Prob: ${match.prob_combo || 0}%
+xG Home: ${match.xg_home || 'N/A'} | xG Away: ${match.xg_away || 'N/A'}
+      `.trim();
+
+      const userPrompt = `Analyze this match for Over 2.5 + BTTS combo:\n${context}`;
+
+      const [geminiRes, deepseekRes, gptRes] = await Promise.all([
+        callLLM('gemini', systemPrompt, userPrompt),
+        callLLM('deepseek', systemPrompt, userPrompt),
+        callLLM('gpt', systemPrompt, userPrompt)
+      ]);
+
+      const allVotes = [geminiRes, deepseekRes, gptRes];
+      const yesCount = allVotes.filter(v => v.vote === "YES").length;
+      const avgConfidence = Math.round(allVotes.reduce((sum, v) => sum + (v.confidence || 0), 0) / 3);
+
+      debates.push({
+        match: `${match.home} vs ${match.away}`,
+        date: match.date,
+        data: match,
+        gemini: geminiRes,
+        deepseek: deepseekRes,
+        gpt: gptRes,
+        consensus: {
+          yesCount,
+          avgConfidence,
+          strength: yesCount >= 2 ? "STRONG" : yesCount === 1 ? "MODERATE" : "WEAK"
+        }
+      });
+    }
+
+    const fs = require('fs');
+    fs.writeFileSync('./public/debates.json', JSON.stringify(debates, null, 2));
+
+    res.json({ success: true, debates, count: debates.length });
+  } catch (error) {
+    console.error('Debate error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`\n✓ Server running on port ${PORT}`)
