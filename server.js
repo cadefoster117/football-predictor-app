@@ -198,6 +198,72 @@ app.get('/api/debate', async (req, res) => {
     console.log(`🎯 Starting Team Free Will debate for ${candidates.length} matches`);
 
     // ... (rest of the debate logic stays the same as my previous version)
+// === TEAM FREE WILL - 3 AI Debate (Gemini + DeepSeek + GPT) ===
+const { callLLM } = require('./llm-helper');
+
+app.get('/team-free-will', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'freewill.html'));
+});
+
+app.get('/api/debate', async (req, res) => {
+  try {
+    let predictions = [];
+    const fs = require('fs');
+
+    // 1. Try your current Free Will file first
+    const freeWillFile = './public/free-will-predictions.json';
+    const originalFile = './public/predictions.json';
+
+    if (fs.existsSync(freeWillFile)) {
+      const raw = fs.readFileSync(freeWillFile, 'utf8').trim();
+      if (raw) {
+        predictions = JSON.parse(raw);
+        console.log(`📂 Loaded ${predictions.length} matches from free-will-predictions.json`);
+      }
+    } 
+    // 2. Fallback to original engine file
+    else if (fs.existsSync(originalFile)) {
+      const raw = fs.readFileSync(originalFile, 'utf8').trim();
+      if (raw) {
+        predictions = JSON.parse(raw);
+        console.log(`📂 Loaded ${predictions.length} matches from predictions.json (fallback)`);
+      }
+    }
+
+    // Ensure we always have an array
+    if (!Array.isArray(predictions)) predictions = [];
+
+    if (predictions.length === 0) {
+      return res.json({
+        success: false,
+        message: "free-will-predictions.json is empty or missing.<br><br>Please run:<br><b>npm run update</b><br>or<br><b>node engine.js</b>"
+      });
+    }
+
+    // Filter next 24 hours
+    const now = Date.now();
+    const twentyFourHoursLater = now + 24 * 60 * 60 * 1000;
+
+    const candidates = predictions
+      .filter(p => {
+        if (!p?.date) return false;
+        try {
+          const matchTime = new Date(p.date).getTime();
+          return matchTime > now && matchTime < twentyFourHoursLater;
+        } catch (e) {
+          return false;
+        }
+      })
+      .slice(0, 8);
+
+    if (candidates.length === 0) {
+      return res.json({
+        success: false,
+        message: `Found ${predictions.length} total matches, but none are in the next 24 hours.<br><br>Run <b>npm run update</b> again to get fresh games.`
+      });
+    }
+
+    console.log(`🚀 Starting Team Free Will debate for ${candidates.length} matches`);
 
     const debates = [];
 
@@ -216,11 +282,11 @@ Match: ${match.home || '?'} vs ${match.away || '?'}
 League: ${match.league || 'Unknown'}
 Prob Over 2.5: ${match.prob_over25 || 0}%
 Prob BTTS: ${match.prob_btts || 0}%
-Combo: ${match.prob_combo || 0}%
-xG Home: ${match.xg_home || 'N/A'} | Away: ${match.xg_away || 'N/A'}
+Combo Prob: ${match.prob_combo || 0}%
+xG Home: ${match.xg_home || 'N/A'} | xG Away: ${match.xg_away || 'N/A'}
       `.trim();
 
-      const userPrompt = `Analyze for Over 2.5 + BTTS:\n${context}`;
+      const userPrompt = `Analyze this match for Over 2.5 + BTTS combo:\n${context}`;
 
       const [geminiRes, deepseekRes, gptRes] = await Promise.all([
         callLLM('gemini', systemPrompt, userPrompt).catch(() => ({vote:"ERROR", confidence:0, reason:"Failed"})),
@@ -251,7 +317,7 @@ xG Home: ${match.xg_home || 'N/A'} | Away: ${match.xg_away || 'N/A'}
     res.json({ success: true, debates, count: debates.length });
 
   } catch (error) {
-    console.error('Debate error:', error);
+    console.error('Team Free Will error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
