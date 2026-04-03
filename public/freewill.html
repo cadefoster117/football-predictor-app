@@ -1,352 +1,73 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="theme-color" content="#050d07">
-<title>AivsBookie — Team Free Will</title>
-
-<link rel="manifest" href="manifest.json">
-<link rel="stylesheet" href="style.css">
-
-<style>
-
-/* ── Free Will specific styles ── */
-
-.fw-hero-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-family: var(--mono);
-  font-size: 0.62rem;
-  color: var(--amber);
-  border: 1px solid var(--amber);
-  background: rgba(255,183,0,0.06);
-  padding: 4px 12px;
-  border-radius: 20px;
-  letter-spacing: 0.12em;
-  margin-bottom: 12px;
-}
-
-.fw-hero-badge .dot-amber {
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: var(--amber);
-  box-shadow: 0 0 6px var(--amber);
-  animation: blink 1.4s ease infinite;
-}
-
-/* ── Debate card ── */
-.debate-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-  margin-bottom: 20px;
-  animation: cardIn 0.4s ease both;
-}
-
-.debate-card::before {
-  content: '';
-  display: block;
-  height: 2px;
-}
-
-.debate-card.passed::before  { background: linear-gradient(90deg, var(--green) 0%, transparent 100%); }
-.debate-card.failed::before  { background: linear-gradient(90deg, var(--red)   0%, transparent 100%); }
-
-/* ── Debate card header ── */
-.debate-head {
-  padding: 16px 20px;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
-}
-
-.debate-match-info { flex: 1; }
-
-.debate-league {
-  font-family: var(--mono);
-  font-size: 0.6rem;
-  color: var(--text-dim);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  margin-bottom: 4px;
-}
-
-.debate-match {
-  font-family: var(--sans);
-  font-size: 1.25rem;
-  font-weight: 700;
-  color: var(--text-bright);
-}
-
-.debate-time {
-  font-family: var(--mono);
-  font-size: 0.68rem;
-  color: var(--text-mid);
-  margin-top: 4px;
-}
-
-/* ── Verdict badge ── */
-.verdict-badge {
-  flex-shrink: 0;
-  text-align: center;
-}
-
-.verdict-main {
-  font-family: var(--mono);
-  font-size: 1.1rem;
-  font-weight: bold;
-  letter-spacing: 0.1em;
-  padding: 8px 18px;
-  border-radius: var(--radius);
-  border: 1px solid;
-  display: block;
-  margin-bottom: 4px;
-}
-
-.verdict-main.pass {
-  color: var(--green);
-  border-color: var(--green);
-  background: var(--green-muted);
-  box-shadow: 0 0 20px var(--green-glow);
-}
-
-.verdict-main.fail {
-  color: var(--red);
-  border-color: var(--red);
-  background: var(--red-muted);
-}
-
-.verdict-conf {
-  font-family: var(--mono);
-  font-size: 0.65rem;
-  color: var(--text-dim);
-  letter-spacing: 0.08em;
-}
-
-/* ── Model scores strip ── */
-.model-strip {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
-  border-bottom: 1px solid var(--border);
-}
-
-.model-cell {
-  padding: 10px 14px;
-  border-right: 1px solid var(--border);
-  text-align: center;
-}
-
-.model-cell:last-child { border-right: none; }
-
-.model-label {
-  font-family: var(--mono);
-  font-size: 0.55rem;
-  color: var(--text-dim);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  margin-bottom: 3px;
-}
-
-.model-val {
-  font-family: var(--mono);
-  font-size: 0.95rem;
-  color: var(--green);
-}
-
-.model-val.amber  { color: var(--amber); }
-.model-val.blue   { color: var(--blue); }
-.model-val.red    { color: var(--red); }
-
-/* ── Debate panel ── */
-.debate-panel {
-  padding: 16px 20px;
-}
-
-.panel-title {
-  font-family: var(--mono);
-  font-size: 0.6rem;
-  color: var(--text-dim);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  margin-bottom: 14px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.panel-title::after {
-  content: ''; flex: 1;
-  height: 1px;
-  background: var(--border);
-}
-
-.panelist-row {
-  display: flex;
-  gap: 12px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--border);
-  align-items: flex-start;
-}
-
-.panelist-row:last-child { border-bottom: none; }
-
-.panelist-id {
-  min-width: 52px;
-  flex-shrink: 0;
-  text-align: center;
-  padding-top: 2px;
-}
-
-.panelist-icon {
-  font-size: 1.3rem;
-  line-height: 1;
-  display: block;
-  margin-bottom: 3px;
-}
-
-.panelist-role {
-  font-family: var(--mono);
-  font-size: 0.55rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  display: block;
-}
-
-.panelist-role.blue   { color: var(--blue); }
-.panelist-role.green  { color: var(--green); }
-.panelist-role.red    { color: var(--red); }
-.panelist-role.amber  { color: var(--amber); }
-.panelist-role.white  { color: var(--text-bright); }
-
-.panelist-body { flex: 1; }
-
-.panelist-name {
-  font-family: var(--mono);
-  font-size: 0.65rem;
-  color: var(--text-mid);
-  margin-bottom: 4px;
-  letter-spacing: 0.04em;
-}
-
-.panelist-arg {
-  font-family: var(--sans);
-  font-size: 0.9rem;
-  color: var(--text-dim);
-  line-height: 1.5;
-}
-
-/* Fatal flaw highlight */
-.panelist-arg .fatal {
-  color: var(--red);
-  font-style: italic;
-}
-
-/* Judge verdict box */
-.judge-verdict-box {
-  background: var(--bg2);
-  border: 1px solid var(--border2);
-  border-radius: var(--radius);
-  padding: 12px 16px;
-  margin-top: 4px;
-}
-
-.judge-verdict-line {
-  font-family: var(--sans);
-  font-size: 0.95rem;
-  color: var(--text);
-  line-height: 1.4;
-}
-
-.judge-verdict-line.pass { color: var(--green); }
-.judge-verdict-line.fail { color: var(--red); }
-
-/* ── Filter bar ── */
-.filter-bar {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 20px;
-  flex-wrap: wrap;
-}
-
-.filter-btn {
-  font-family: var(--mono);
-  font-size: 0.65rem;
-  color: var(--text-dim);
-  border: 1px solid var(--border);
-  background: var(--surface);
-  padding: 6px 14px;
-  border-radius: 20px;
-  cursor: pointer;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  transition: all 0.2s;
-}
-
-.filter-btn:hover,
-.filter-btn.active {
-  color: var(--green);
-  border-color: var(--green);
-  background: var(--green-muted);
-}
-
-.filter-btn.active-red {
-  color: var(--red);
-  border-color: var(--red);
-  background: var(--red-muted);
-}
-
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Team Free Will • AI Debate</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .match-card {
+      background: #111;
+      border: 1px solid #333;
+      border-radius: 16px;
+      padding: 24px;
+      margin-bottom: 32px;
+    }
+    .ai-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+      margin-top: 20px;
+    }
+    .ai-card {
+      background: #1a1a1a;
+      border: 1px solid #444;
+      border-radius: 12px;
+      padding: 18px;
+    }
+    .ai-header {
+      font-weight: bold;
+      margin-bottom: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .vote-yes { color: #4ade80; font-weight: bold; }
+    .vote-no { color: #f87171; font-weight: bold; }
+    .vote-maybe, .vote-error { color: #fbbf24; }
+    .consensus {
+      background: #1e1e1e;
+      padding: 14px;
+      border-radius: 10px;
+      margin: 20px 0;
+      font-size: 1.05em;
+    }
+    button {
+      background: #3b82f6;
+      color: white;
+      border: none;
+      padding: 14px 28px;
+      border-radius: 10px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    button:hover { background: #2563eb; }
+    button:disabled { background: #555; cursor: not-allowed; }
+  </style>
 </head>
 <body>
+  <div class="container">
+    <h1>⚽ Team Free Will • AI Debate</h1>
+    <p>Three expert AIs (Gemini, DeepSeek, GPT) analyze the strongest Over 2.5 + BTTS opportunities in the next 24 hours.</p>
 
-<header>
-  <div class="logo">
-    <div class="logo-icon">AI</div>
-    AivsBookie
-    <span class="logo-sub">// team free will</span>
-  </div>
-  <nav>
-    <a class="nav-btn" href="/">Today</a>
-    <a class="nav-btn active" href="freewill.html">Free Will</a>
-    <a class="nav-btn" href="history.html">History</a>
-  </nav>
-</header>
-
-<div class="page">
-
-  <div class="hero">
-    <div class="fw-hero-badge">
-      <span class="dot-amber"></span>
-      TEAM FREE WILL — ACTIVE
+    <div style="margin: 25px 0;">
+      <button id="runDebateBtn">🚀 Run Fresh AI Debate (3 Models)</button>
+      <span id="status" style="margin-left: 20px; font-size: 15px;"></span>
     </div>
-    <div class="hero-label">// ai debate panel</div>
-    <div class="hero-title" id="hero-title">Loading debate...</div>
-    <div class="hero-meta">
-      <span id="hero-sub">—</span>
-    </div>
+
+    <div id="debatesContainer"></div>
   </div>
 
-  <div class="stats-strip" id="stats-strip"></div>
-
-  <div class="filter-bar" id="filter-bar" style="display:none">
-    <button class="filter-btn active" data-filter="all">All Games</button>
-    <button class="filter-btn" data-filter="passed">Passed Only</button>
-    <button class="filter-btn" data-filter="failed">Failed Only</button>
-  </div>
-
-  <div class="section-head" id="section-head" style="display:none">Debate Results</div>
-  <div id="debate-list"></div>
-
-</div>
-
-<script src="freewill.js"></script>
-
+  <script src="freewill.js"></script>
 </body>
 </html>
