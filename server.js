@@ -152,45 +152,81 @@ app.get('/team-free-will', (req, res) => {
 app.get('/api/debate', async (req, res) => {
   try {
     let predictions = [];
+
+    // Safe loading of predictions.json
     try {
-      predictions = require('./public/predictions.json');
-    } catch (e) {}
+      const fs = require('fs');
+      const filePath = './public/predictions.json';
+      
+      if (fs.existsSync(filePath)) {
+        const rawData = fs.readFileSync(filePath, 'utf8').trim();
+        if (rawData) {
+          predictions = JSON.parse(rawData);
+          
+          // Ensure it's always an array
+          if (!Array.isArray(predictions)) {
+            console.warn('predictions.json is not an array, resetting to empty');
+            predictions = [];
+          }
+        }
+      } else {
+        console.warn('predictions.json not found — using empty list');
+      }
+    } catch (parseError) {
+      console.error('Error reading predictions.json:', parseError.message);
+      predictions = [];
+    }
+
+    // Filter matches in next 24 hours (safe check)
+    const now = Date.now();
+    const twentyFourHoursLater = now + 24 * 60 * 60 * 1000;
 
     const candidates = predictions
-      .filter(p => new Date(p.date) > Date.now() && new Date(p.date) < Date.now() + 24*60*60*1000)
-      .slice(0, 8);
+      .filter(p => {
+        if (!p || !p.date) return false;
+        const matchDate = new Date(p.date).getTime();
+        return matchDate > now && matchDate < twentyFourHoursLater;
+      })
+      .slice(0, 8);   // limit to max 8 matches to control cost
 
     if (candidates.length === 0) {
-      return res.json({ success: false, message: "No matches in next 24 hours" });
+      return res.json({ 
+        success: false, 
+        message: "No matches found in the next 24 hours. Run the engine first." 
+      });
     }
+
+    console.log(`🔍 Starting Team Free Will debate for ${candidates.length} matches`);
 
     const debates = [];
 
     const systemPrompt = `You are a professional football betting analyst specialized in Over 2.5 goals + Both Teams To Score (BTTS) combo bets.
 Analyze ONLY the provided data. Do not invent statistics.
-Respond strictly with valid JSON in this format:
+Respond strictly with valid JSON in this exact format:
 {
   "vote": "YES" or "NO" or "MAYBE",
-  "confidence": number 0-100,
-  "reason": "clear explanation, max 3 sentences"
+  "confidence": number between 0 and 100,
+  "reason": "clear and concise explanation (maximum 3 sentences)"
 }`;
 
     for (const match of candidates) {
       const context = `
-Match: ${match.home} vs ${match.away}
+Match: ${match.home || 'Unknown'} vs ${match.away || 'Unknown'}
 League: ${match.league || 'Unknown'}
+Date: ${match.date || 'N/A'}
 Prob Over 2.5: ${match.prob_over25 || 0}%
 Prob BTTS: ${match.prob_btts || 0}%
 Combo Prob: ${match.prob_combo || 0}%
 xG Home: ${match.xg_home || 'N/A'} | xG Away: ${match.xg_away || 'N/A'}
       `.trim();
 
-      const userPrompt = `Analyze this match for Over 2.5 + BTTS combo:\n${context}`;
+      const userPrompt = `Analyze this match for Over 2.5 + BTTS combo bet:\n${context}`;
 
+      // Call the 3 models in parallel
       const [geminiRes, deepseekRes, gptRes] = await Promise.all([
-        callLLM('gemini', systemPrompt, userPrompt),
-        callLLM('deepseek', systemPrompt, userPrompt),
-        callLLM('gpt', systemPrompt, userPrompt)
+        callLLM('gemini', systemPrompt, userPrompt).catch(() => ({vote:"ERROR", confidence:0, reason:"Failed"})),
+        callLLM('deepseek', systemPrompt, userPrompt).catch(() => ({vote:"ERROR", confidence:0, reason:"Failed"})),
+        callLLM('gpt', systemPrompt, userPrompt).catch(() => ({vote:"ERROR", confidence:0, reason:"Failed"}))
       ]);
 
       const allVotes = [geminiRes, deepseekRes, gptRes];
@@ -198,7 +234,7 @@ xG Home: ${match.xg_home || 'N/A'} | xG Away: ${match.xg_away || 'N/A'}
       const avgConfidence = Math.round(allVotes.reduce((sum, v) => sum + (v.confidence || 0), 0) / 3);
 
       debates.push({
-        match: `${match.home} vs ${match.away}`,
+        match: `${match.home || '?'} vs ${match.away || '?'}`,
         date: match.date,
         data: match,
         gemini: geminiRes,
@@ -212,13 +248,24 @@ xG Home: ${match.xg_home || 'N/A'} | xG Away: ${match.xg_away || 'N/A'}
       });
     }
 
+    // Save results
     const fs = require('fs');
     fs.writeFileSync('./public/debates.json', JSON.stringify(debates, null, 2));
 
-    res.json({ success: true, debates, count: debates.length });
+    res.json({ 
+      success: true, 
+      debates, 
+      count: debates.length,
+      note: `Debated ${debates.length} matches`
+    });
+
   } catch (error) {
-    console.error('Debate error:', error.message);
-    res.status(500).json({ success: false, error: error.message });
+    console.error('Team Free Will error:', error.message);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      note: "Check server logs for details"
+    });
   }
 });
 
