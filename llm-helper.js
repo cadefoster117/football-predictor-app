@@ -6,13 +6,13 @@ const LLMAPI_KEY = process.env.LLMAPI_KEY;
 const BASE_URL = 'https://api.llmapi.ai/v1';
 
 if (!LLMAPI_KEY) {
-  console.error('❌ LLMAPI_KEY is missing in .env file');
+  console.error('❌ LLMAPI_KEY is missing in .env — Team Free Will will not work');
 }
 
 const models = {
-  gemini:   'google/gemini-2.5-flash',      // fast & good value
-  deepseek: 'deepseek/deepseek-chat',       // very cost-effective
-  gpt:      'openai/gpt-4o-mini'            // balanced
+  gemini:   'google/gemini-2.5-flash',
+  deepseek: 'deepseek/deepseek-chat',
+  gpt:      'openai/gpt-4o-mini'
 };
 
 async function callLLM(modelKey, systemPrompt, userPrompt) {
@@ -46,7 +46,7 @@ async function callLLM(modelKey, systemPrompt, userPrompt) {
     return {
       vote: "ERROR",
       confidence: 0,
-      reason: `API call failed for ${modelKey}. Please try again later.`
+      reason: `API call failed for ${modelKey}. Try again later.`
     };
   }
 }
