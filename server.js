@@ -216,51 +216,32 @@ app.get('/api/debate', async (req, res) => {
 Analyze ONLY the provided data. Do not invent statistics.
 Respond strictly with valid JSON:
 {
-  "vote": "YES"|"NO"|"MAYBE",
-  "confidence": number 0-100,
-  "reason": "clear explanation, max 3 sentences"
-}`;
+// === TEAM FREE WILL - 3 AI Debate (Gemini + DeepSeek + GPT) ===
+const { callLLM } = require('./llm-helper');
 
-    for (const match of candidates) {
-      const context = `
-Match: ${match.home || '?'} vs ${match.away || '?'}
-League: ${match.league || 'Unknown'}
-Prob Over 2.5: ${match.prob_over25 || 0}%
-Prob BTTS: ${match.prob_btts || 0}%
-Combo Prob: ${match.prob_combo || 0}%
-xG Home: ${match.xg_home || 'N/A'} | xG Away: ${match.xg_away || 'N/A'}
-      `.trim();
+app.get('/team-free-will', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'freewill.html'));
+});
 
-      const userPrompt = `Analyze this match for Over 2.5 + BTTS combo:\n${context}`;
+app.get('/api/debate', async (req, res) => {
+  try {
+    let data = [];
+    const debateFile = path.join(__dirname, "public/freewill-debate.json");
 
-      const [geminiRes, deepseekRes, gptRes] = await Promise.all([
-        callLLM('gemini', systemPrompt, userPrompt).catch(() => ({vote:"ERROR", confidence:0, reason:"Failed"})),
-        callLLM('deepseek', systemPrompt, userPrompt).catch(() => ({vote:"ERROR", confidence:0, reason:"Failed"})),
-        callLLM('gpt', systemPrompt, userPrompt).catch(() => ({vote:"ERROR", confidence:0, reason:"Failed"}))
-      ]);
+    if (fs.existsSync(debateFile)) {
+      const raw = fs.readFileSync(debateFile, 'utf8').trim();
+      if (raw) data = JSON.parse(raw);
+      console.log(`📂 Loaded ${data.length || 0} debates from freewill-debate.json`);
+    }
 
-      const allVotes = [geminiRes, deepseekRes, gptRes];
-      const yesCount = allVotes.filter(v => v.vote === "YES").length;
-      const avgConfidence = Math.round(allVotes.reduce((s, v) => s + (v.confidence || 0), 0) / 3);
-
-      debates.push({
-        match: `${match.home || '?'} vs ${match.away || '?'}`,
-        date: match.date,
-        gemini: geminiRes,
-        deepseek: deepseekRes,
-        gpt: gptRes,
-        consensus: {
-          yesCount,
-          avgConfidence,
-          strength: yesCount >= 2 ? "STRONG" : yesCount === 1 ? "MODERATE" : "WEAK"
-        }
+    if (!Array.isArray(data) || data.length === 0) {
+      return res.json({
+        success: false,
+        message: "freewill-debate.json is empty.<br>Run <b>npm run update</b> or <b>/run-freewill-debate</b> first."
       });
     }
 
-    fs.writeFileSync('./public/debates.json', JSON.stringify(debates, null, 2));
-
-    res.json({ success: true, debates, count: debates.length });
-
+    res.json({ success: true, debates: data, count: data.length });
   } catch (error) {
     console.error('Team Free Will error:', error);
     res.status(500).json({ success: false, error: error.message });
