@@ -1,8 +1,8 @@
 // ══════════════════════════════════════════
 //  AivsBookie — freewill-debate.js
 //  Team Free Will: 3 AI debate per game
-//  Gemini + DeepSeek + GPT via llmapi.ai
-//  Combined with XGBoost+LightGBM+CatBoost
+//  DeepSeek (x2 roles) + GPT-4o-mini
+//  Avoids Gemini — unreliable on this API
 // ══════════════════════════════════════════
 
 require("dotenv").config()
@@ -10,124 +10,114 @@ require("dotenv").config()
 const fs = require("fs")
 const { callLLM } = require("./llm-helper")
 
-// ── System prompt (same for all 3 AIs) ───
-// Each AI plays a different persona via
-// the user prompt framing, not system prompt.
-// This gives cleaner JSON output.
-
-const SYSTEM_PROMPT = `You are an expert football betting analyst. 
-Analyze the provided match data and give your assessment of the Over 2.5 Goals + BTTS bet.
-You MUST respond ONLY with a valid JSON object in this exact format:
-{
-  "vote": "YES" or "NO",
-  "confidence": number between 0 and 100,
-  "reason": "one clear sentence explaining your decision",
-  "key_signal": "the single most important data point in your decision"
-}
-No extra text. No markdown. Only the JSON object.`
-
-// ── AI Personas ───────────────────────────
+// ── Personas ──────────────────────────────
+// deepseek  → The Analyst (data-driven)
+// gpt       → The Advocate (argues YES)
+// deepseek  → The Skeptic (argues NO)
+// Judge verdict: majority of the 3 votes
 
 const PERSONAS = {
-  gemini: {
-    name:  "Gemini",
-    icon:  "♊",
+  analyst: {
+    name:  "The Analyst",
+    icon:  "📊",
     color: "blue",
-    model: "gemini",
-    role:  "You are a statistical probability expert. Focus purely on the numerical model outputs and probability signals."
-  },
-  deepseek: {
-    name:  "DeepSeek",
-    icon:  "🔍",
-    color: "green",
     model: "deepseek",
-    role:  "You are a football tactics and market analyst. Focus on xG values, team attacking balance, and market movement signals."
+    system: `You are a cold football statistics analyst. You only trust numbers.
+Assess the Over 2.5 Goals + BTTS bet based purely on probability data, xG values, and model outputs.
+Respond ONLY with valid JSON:
+{"vote":"YES" or "NO","confidence":0-100,"reason":"one sentence","key_signal":"most important number"}`
   },
-  gpt: {
-    name:  "GPT-4o",
-    icon:  "🤖",
-    color: "amber",
+  advocate: {
+    name:  "The Advocate",
+    icon:  "🟢",
+    color: "green",
     model: "gpt",
-    role:  "You are a value betting specialist. Focus on risk assessment, red flags, and whether the odds offer genuine value."
+    system: `You are a football betting advocate. Make the strongest case FOR betting Over 2.5 Goals + BTTS.
+Find every positive signal. Be persuasive but only use the data provided.
+Respond ONLY with valid JSON:
+{"vote":"YES" or "NO","confidence":0-100,"reason":"one sentence","key_signal":"strongest positive signal"}`
+  },
+  skeptic: {
+    name:  "The Skeptic",
+    icon:  "🔴",
+    color: "red",
+    model: "deepseek",
+    system: `You are a football betting skeptic. Find every reason the Over 2.5 Goals + BTTS bet will FAIL.
+Look for: clean sheet risk, heavy favourite, weak xG, low confidence, misaligned market.
+If you find a fatal flaw label it: "FATAL FLAW: [reason]"
+Respond ONLY with valid JSON:
+{"vote":"YES" or "NO","confidence":0-100,"reason":"one sentence","key_signal":"biggest red flag or N/A"}`
   }
 }
 
-// ── Build game brief ──────────────────────
+// ── Game brief ────────────────────────────
 
 function gameBrief(game) {
   const m = game.models
-  return `
-MATCH: ${game.match}
+  return `MATCH: ${game.match}
 LEAGUE: ${game.league}
 KICKOFF: ${game.date} ${game.time}
 
-PROBABILITY DATA:
-  Over 1.5 Goals: ${(game.prob_over_15 ?? 0).toFixed(1)}%
-  Over 2.5 Goals: ${(game.prob_over_25 ?? 0).toFixed(1)}%
-  Over 3.5 Goals: ${(game.prob_over_35 ?? 0).toFixed(1)}%
-  BTTS (Yes):     ${(game.prob_btts_yes ?? 0).toFixed(1)}%
-  Home Win:       ${(game.prob_home_win ?? 0).toFixed(1)}%
-  Draw:           ${(game.prob_draw ?? 0).toFixed(1)}%
-  Away Win:       ${(game.prob_away_win ?? 0).toFixed(1)}%
+PROBABILITIES:
+  Over 1.5: ${(game.prob_over_15 ?? 0).toFixed(1)}%
+  Over 2.5: ${(game.prob_over_25 ?? 0).toFixed(1)}%
+  Over 3.5: ${(game.prob_over_35 ?? 0).toFixed(1)}%
+  BTTS:     ${(game.prob_btts_yes ?? 0).toFixed(1)}%
+  Home Win: ${(game.prob_home_win ?? 0).toFixed(1)}%
+  Draw:     ${(game.prob_draw ?? 0).toFixed(1)}%
+  Away Win: ${(game.prob_away_win ?? 0).toFixed(1)}%
 
 EXPECTED GOALS:
   Home xG: ${game.expected_home_goals?.toFixed(2) ?? "N/A"}
   Away xG: ${game.expected_away_goals?.toFixed(2) ?? "N/A"}
-  Total xG: ${((game.expected_home_goals ?? 0) + (game.expected_away_goals ?? 0)).toFixed(2)}
+  Total:   ${((game.expected_home_goals ?? 0) + (game.expected_away_goals ?? 0)).toFixed(2)}
 
 MODEL SIGNALS:
-  Predicted result:   ${game.predicted_result ?? "N/A"}
-  Most likely score:  ${game.most_likely_score ?? "N/A"}
-  Model confidence:   ${game.confidence != null ? (game.confidence * 100).toFixed(0) + "%" : "N/A"}
-  Favorite win prob:  ${game.favorite_prob?.toFixed(1) ?? "N/A"}%
-  BSD recommends BTTS:    ${game.btts_recommend ? "YES" : "NO"}
-  BSD recommends Over2.5: ${game.over_25_recommend ? "YES" : "NO"}
+  Predicted result:    ${game.predicted_result ?? "N/A"}
+  Most likely score:   ${game.most_likely_score ?? "N/A"}
+  Model confidence:    ${game.confidence != null ? (game.confidence * 100).toFixed(0) + "%" : "N/A"}
+  Favorite win prob:   ${game.favorite_prob?.toFixed(1) ?? "N/A"}%
+  BSD recommends BTTS: ${game.btts_recommend ? "YES" : "NO"}
+  BSD recommends O2.5: ${game.over_25_recommend ? "YES" : "NO"}
 
-OUR ML ENSEMBLE (XGBoost + LightGBM + CatBoost):
-  XGBoost:  ${(m.xgboost.score * 100).toFixed(1)}% — ${m.xgboost.label}
-  LightGBM: ${(m.lightgbm.score * 100).toFixed(1)}% — ${m.lightgbm.label}
-  CatBoost: ${(m.catboost.score * 100).toFixed(1)}% — ${m.catboost.label}
-  Ensemble: ${(m.ensemble * 100).toFixed(1)}%
-  Votes:    ${m.votes}/3
-  Market signal: ${m.features?.market_signal?.toFixed(1) ?? "N/A"}/2.5
-`.trim()
+ML ENSEMBLE (XGBoost + LightGBM + CatBoost):
+  XGBoost:  ${(m.xgboost.score * 100).toFixed(1)}% (${m.xgboost.label})
+  LightGBM: ${(m.lightgbm.score * 100).toFixed(1)}% (${m.lightgbm.label})
+  CatBoost: ${(m.catboost.score * 100).toFixed(1)}% (${m.catboost.label})
+  Ensemble: ${(m.ensemble * 100).toFixed(1)}% | Votes: ${m.votes}/3`
 }
 
 // ── Debate one game ───────────────────────
 
 async function debateGame(game) {
   const brief = gameBrief(game)
+  const userPrompt = `Analyze this match for Over 2.5 Goals + BTTS:\n\n${brief}`
+
   console.log(`  ⚡ ${game.match}`)
 
   const votes = {}
 
-  // Run all 3 AIs in parallel
+  // Run all 3 in parallel
   await Promise.all(
     Object.entries(PERSONAS).map(async ([key, persona]) => {
       try {
-        const userPrompt = `${persona.role}\n\nAnalyze this match for Over 2.5 + BTTS:\n\n${brief}`
-        const result = await callLLM(persona.model, SYSTEM_PROMPT, userPrompt)
-
+        const result = await callLLM(persona.model, persona.system, userPrompt)
         votes[key] = {
           name:       persona.name,
           icon:       persona.icon,
           color:      persona.color,
           vote:       result.vote === "YES" ? "YES" : "NO",
           confidence: Math.min(100, Math.max(0, parseInt(result.confidence) || 0)),
-          reason:     result.reason || "No reason provided",
+          reason:     result.reason     || "No reason provided",
           key_signal: result.key_signal || "N/A"
         }
         process.stdout.write(`    ${persona.icon} ${persona.name}: ${votes[key].vote} (${votes[key].confidence}%)  `)
       } catch (err) {
         console.error(`\n    ✗ ${persona.name} failed:`, err.message)
         votes[key] = {
-          name:       persona.name,
-          icon:       persona.icon,
-          color:      persona.color,
-          vote:       "ERROR",
-          confidence: 0,
-          reason:     `API call failed: ${err.message}`,
-          key_signal: "N/A"
+          name: persona.name, icon: persona.icon, color: persona.color,
+          vote: "ERROR", confidence: 0,
+          reason: `Failed: ${err.message}`, key_signal: "N/A"
         }
       }
     })
@@ -135,30 +125,29 @@ async function debateGame(game) {
 
   console.log()
 
-  // Calculate consensus
-  const validVotes  = Object.values(votes).filter(v => v.vote !== "ERROR")
-  const yesCount    = validVotes.filter(v => v.vote === "YES").length
-  const totalVotes  = validVotes.length || 1
-  const avgConf     = Math.round(validVotes.reduce((s,v) => s + v.confidence, 0) / totalVotes)
-  const passed      = yesCount >= 2 // majority: at least 2 of 3
+  // Consensus: count valid YES votes
+  const valid    = Object.values(votes).filter(v => v.vote !== "ERROR")
+  const yesCount = valid.filter(v => v.vote === "YES").length
+  const total    = valid.length || 1
+  const avgConf  = Math.round(valid.reduce((s, v) => s + v.confidence, 0) / total)
+  const passed   = yesCount >= 2
 
-  const strength    = yesCount === 3 ? "STRONG"
-                    : yesCount === 2 ? "MODERATE"
-                    : yesCount === 1 ? "WEAK"
-                    : "NONE"
+  const strength = yesCount === 3 ? "STRONG"
+                 : yesCount === 2 ? "MODERATE"
+                 : yesCount === 1 ? "WEAK" : "NONE"
 
-  console.log(`    → ${yesCount}/${totalVotes} YES | ${strength} | Avg conf: ${avgConf}%`)
+  console.log(`    → ${yesCount}/${total} YES | ${strength} | avg ${avgConf}%`)
 
   return {
     ...game,
     debate: {
       passed,
       yes_count:      yesCount,
-      total_votes:    totalVotes,
+      total_votes:    total,
       avg_confidence: avgConf,
       strength,
       votes,
-      summary: `${yesCount}/${totalVotes} AIs recommend Over 2.5 + BTTS — ${strength} consensus at ${avgConf}% average confidence`
+      summary: `${yesCount}/${total} AIs recommend Over 2.5 + BTTS — ${strength} consensus at ${avgConf}% avg confidence`
     }
   }
 }
@@ -168,10 +157,9 @@ async function debateGame(game) {
 async function run() {
   console.log("\n╔══════════════════════════════════════╗")
   console.log("║  Team Free Will — AI Debate Engine   ║")
-  console.log("║  Gemini + DeepSeek + GPT-4o-mini     ║")
+  console.log("║  DeepSeek · GPT-4o · DeepSeek       ║")
   console.log("╚══════════════════════════════════════╝\n")
 
-  // Load top 10 from freewill-engine
   let top10 = []
   try {
     const raw = JSON.parse(fs.readFileSync("public/freewill-predictions.json"))
@@ -182,24 +170,22 @@ async function run() {
   }
 
   if (top10.length === 0) {
-    console.log("⚠ No games to debate — writing empty output")
+    console.log("⚠ No games to debate")
     fs.writeFileSync("public/freewill-debate.json", JSON.stringify({
       last_scan: new Date().toISOString(), games_debated: 0, passed: 0, results: []
     }, null, 2))
     return
   }
 
-  console.log(`📋 Debating ${top10.length} games with 3 AIs each...\n`)
+  console.log(`📋 Debating ${top10.length} games...\n`)
 
   const results = []
-
   for (const game of top10) {
     const r = await debateGame(game)
     results.push(r)
-    await new Promise(res => setTimeout(res, 300))
+    await new Promise(r => setTimeout(r, 400))
   }
 
-  // Sort: passed first → by yes_count → by avg_confidence
   results.sort((a, b) => {
     if (a.debate.passed !== b.debate.passed) return b.debate.passed - a.debate.passed
     if (a.debate.yes_count !== b.debate.yes_count) return b.debate.yes_count - a.debate.yes_count
@@ -215,11 +201,7 @@ async function run() {
     results
   }, null, 2))
 
-  console.log("\n╔══════════════════════════════════════╗")
-  console.log(`║  ✅ Debate complete!                 ║`)
-  console.log(`║  Games debated : ${String(results.length).padEnd(20)}║`)
-  console.log(`║  Passed (2+/3) : ${String(passed.length).padEnd(20)}║`)
-  console.log("╚══════════════════════════════════════╝\n")
+  console.log(`\n✅ Done — ${passed.length}/${results.length} passed\n`)
 }
 
 run()
