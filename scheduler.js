@@ -1,74 +1,67 @@
 // ══════════════════════════════════════════
 //  AivsBookie — scheduler.js
-//  Runs all engines ONCE per day at 00:05
-//  Set SCAN_TIMEZONE in .env (IANA format)
-//  e.g. Europe/London, America/New_York
-//  Default: UTC
+//  Runs ALL engines once per day at 00:05
+//  Timezone: Europe/Sofia (Bulgaria)
 // ══════════════════════════════════════════
 
 require("dotenv").config()
 const { exec } = require("child_process")
 
-const TIMEZONE = process.env.SCAN_TIMEZONE || "UTC"
+const TIMEZONE = process.env.SCAN_TIMEZONE || "Europe/Sofia"
 
-// Calculate ms until next 00:05 in the configured timezone
 function msUntilNextScan() {
-  const now = new Date()
-
-  // Get current time in target timezone
+  const now   = new Date()
   const tzNow = new Date(now.toLocaleString("en-US", { timeZone: TIMEZONE }))
 
-  // Build next 00:05 target in that timezone
   const target = new Date(tzNow)
   target.setHours(0, 5, 0, 0)
 
-  // If 00:05 already passed today, schedule for tomorrow
+  // Already past 00:05 today → schedule tomorrow
   if (tzNow >= target) target.setDate(target.getDate() + 1)
 
-  // Convert back: find the UTC offset difference
-  const offsetMs = now - tzNow
+  const offsetMs  = now - tzNow
   const targetUTC = new Date(target.getTime() + offsetMs)
-
   return targetUTC - now
 }
 
 function runAll() {
   const ts = new Date().toLocaleString("en-GB", { timeZone: TIMEZONE })
-  console.log(`\n[Scheduler] Daily scan at ${ts} (${TIMEZONE})`)
+  console.log(`\n[Scheduler] Daily scan started at ${ts} (${TIMEZONE})`)
 
-  exec("node engine.js", (err, stdout) => {
+  // Step 1: main predictions engine
+  exec("node engine.js", (err) => {
     if (err) console.error("[Scheduler] Main engine error:", err.message)
-    else     console.log("[Scheduler] Main engine done")
+    else     console.log("[Scheduler] ✓ Main engine done")
   })
 
-  exec("node accas-engine.js", (err, stdout) => {
+  // Step 2: accas engine (DeepSeek)
+  exec("node accas-engine.js", (err) => {
     if (err) console.error("[Scheduler] Accas engine error:", err.message)
-    else     console.log("[Scheduler] Accas engine done")
+    else     console.log("[Scheduler] ✓ Accas engine done")
   })
 
-  exec("node freewill-engine.js", (err, stdout) => {
+  // Step 3: freewill models → then debate
+  exec("node freewill-engine.js", (err) => {
     if (err) { console.error("[Scheduler] FreeWill engine error:", err.message); return }
-    console.log("[Scheduler] FreeWill engine done")
+    console.log("[Scheduler] ✓ FreeWill engine done")
 
     if (process.env.LLMAPI_KEY) {
       exec("node freewill-debate.js", (err2) => {
         if (err2) console.error("[Scheduler] Debate error:", err2.message)
-        else      console.log("[Scheduler] Debate done")
+        else      console.log("[Scheduler] ✓ Debate done")
       })
     }
   })
 }
 
 function scheduleNextRun() {
-  const ms = msUntilNextScan()
+  const ms   = msUntilNextScan()
   const hrs  = Math.floor(ms / 3600000)
   const mins = Math.floor((ms % 3600000) / 60000)
-
-  console.log(`[Scheduler] Next scan in ${hrs}h ${mins}m (daily at 00:05 ${TIMEZONE})`)
+  console.log(`[Scheduler] Next scan in ${hrs}h ${mins}m — daily at 00:05 Europe/Sofia`)
 
   setTimeout(() => {
     runAll()
-    // Schedule the one after
     scheduleNextRun()
   }, ms)
 }
