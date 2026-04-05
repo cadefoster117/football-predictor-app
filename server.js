@@ -12,8 +12,6 @@ const { exec } = require("child_process")
 const app  = express()
 const PORT = process.env.PORT || 3000
 
-// Stale = file missing OR older than 23 hours
-// (ensures it always refreshes within a day cycle)
 const STALE_MS = 23 * 60 * 60 * 1000
 
 function isStale(filePath) {
@@ -36,8 +34,8 @@ app.get("/predictions", (req,res) => {
   catch { res.json({last_scan:null,games_scanned:0,candidates:0,ai_confirmed:0,predictions:[]}) }
 })
 
-// ── API: accas (AI-generated, once per day) ─
-app.get("/accas", (req,res) => {
+// ── API: accas (FIXED: /api/accas not /accas) ─
+app.get("/api/accas", (req,res) => {
   try { res.json(JSON.parse(fs.readFileSync(path.join(__dirname,"public/accas.json")))) }
   catch { res.json({last_scan:null,date_label:null,accas:[]}) }
 })
@@ -122,20 +120,20 @@ app.get("/status", (req,res) => {
   })
 })
 
-// ── Startup: run engines only if stale ──────
+// ── Startup ─────────────────────────────────
 function runOnStartup() {
   const tz = process.env.SCAN_TIMEZONE || "UTC"
-  console.log(`  Timezone  : ${tz}`)
-  console.log(`  LLMAPI    : ${process.env.LLMAPI_KEY ? "✓" : "✗ not set"}`)
-  console.log(`  BSD Token : ${process.env.BSD_TOKEN  ? "✓" : "✗ not set"}\n`)
+  console.log(`  Timezone : ${tz}`)
+  console.log(`  LLMAPI   : ${process.env.LLMAPI_KEY ? "✓" : "✗ not set"}`)
+  console.log(`  BSD      : ${process.env.BSD_TOKEN  ? "✓" : "✗ not set"}\n`)
 
-  const predPath   = path.join(__dirname,"public/predictions.json")
-  const accasPath  = path.join(__dirname,"public/accas.json")
-  const fwPath     = path.join(__dirname,"public/freewill-predictions.json")
+  const predPath  = path.join(__dirname,"public/predictions.json")
+  const accasPath = path.join(__dirname,"public/accas.json")
+  const fwPath    = path.join(__dirname,"public/freewill-predictions.json")
 
   if (isStale(predPath)) {
     console.log("▶ predictions stale — running main engine...")
-    exec("node engine.js", (err,stdout) => {
+    exec("node engine.js", (err) => {
       if(err) console.error("✗ Main engine:",err.message)
       else    console.log("✓ Main engine done")
     })
@@ -145,7 +143,7 @@ function runOnStartup() {
 
   if (isStale(accasPath)) {
     console.log("▶ accas stale — running accas engine...")
-    exec("node accas-engine.js", (err,stdout) => {
+    exec("node accas-engine.js", (err) => {
       if(err) console.error("✗ Accas engine:",err.message)
       else    console.log("✓ Accas engine done")
     })
@@ -155,7 +153,7 @@ function runOnStartup() {
 
   if (isStale(fwPath)) {
     console.log("▶ freewill stale — running FreeWill engine...")
-    exec("node freewill-engine.js", (err,stdout) => {
+    exec("node freewill-engine.js", (err) => {
       if(err) { console.error("✗ FreeWill:",err.message); return }
       console.log("✓ FreeWill engine done")
       if (process.env.LLMAPI_KEY) {
