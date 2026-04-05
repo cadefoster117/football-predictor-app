@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#050d07">
+<title>AivsBookie — Team Free Will</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="logo">
+    <div class="logo-icon">AI</div>
+    AivsBookie
+    <span class="logo-sub">// team free will</span>
+  </div>
+  <nav>
+    <a class="nav-btn" href="/">Today</a>
+    <a class="nav-btn" href="accas.html">Accas</a>
+    <a class="nav-btn active" href="freewill.html">Free Will</a>
+    <a class="nav-btn" href="history.html">History</a>
+  </nav>
+</header>
+
+<div class="page">
+  <div class="hero">
+    <div class="fw-hero-badge">
+      <span class="dot-amber"></span>
+      TEAM FREE WILL — 3 AI DEBATE
+    </div>
+    <div class="hero-label">// gemini · deepseek · gpt-4o</div>
+    <div class="hero-title" id="hero-title">Loading debate...</div>
+    <div class="hero-meta"><span id="hero-sub">—</span></div>
+  </div>
+
+  <div class="stats-strip" id="stats-strip"></div>
+
+  <div class="filter-bar" id="filter-bar" style="display:none">
+    <button class="filter-btn active" data-filter="all">All Games</button>
+    <button class="filter-btn" data-filter="passed">Passed Only</button>
+    <button class="filter-btn" data-filter="failed">Failed Only</button>
+  </div>
+
+  <div class="section-head" id="section-head" style="display:none">Debate Results</div>
+  <div id="debate-list"></div>
+</div>
+
+<script src="freewill.js"></script>
+</body>
+</html>
