@@ -1,0 +1,15 @@
+{
+  "name": "aivsbookie",
+  "version": "1.0.0",
+  "description": "AI-powered football predictions — Over 2.5 & BTTS ensemble",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "engine": "node engine.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "dotenv": "^16.0.0",
+    "express": "^4.18.0"
+  }
+}
