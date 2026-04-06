@@ -1,8 +1,9 @@
 // ══════════════════════════════════════════
 //  AivsBookie — freewill-debate.js
 //  Team Free Will: 3 AI debate per game
-//  DeepSeek (x2 roles) + GPT-4o-mini
-//  Avoids Gemini — unreliable on this API
+//  Input: real BSD games from freewill-engine
+//  DeepSeek (Analyst) + GPT (Advocate) +
+//  DeepSeek (Skeptic) — majority vote
 // ══════════════════════════════════════════
 
 require("dotenv").config()
@@ -11,66 +12,57 @@ const fs = require("fs")
 const { callLLM } = require("./llm-helper")
 
 // ── Personas ──────────────────────────────
-// deepseek  → The Analyst (data-driven)
-// gpt       → The Advocate (argues YES)
-// deepseek  → The Skeptic (argues NO)
-// Judge verdict: majority of the 3 votes
 
 const PERSONAS = {
   analyst: {
-    name:  "The Analyst",
-    icon:  "📊",
-    color: "blue",
-    model: "deepseek",
-    system: `You are a cold football statistics analyst. You only trust numbers.
-Assess the Over 2.5 Goals + BTTS bet based purely on probability data, xG values, and model outputs.
+    name: "The Analyst", icon: "📊", color: "blue", model: "deepseek",
+    system: `You are a cold football statistics analyst. You only trust numbers and model outputs.
+Assess ONLY the Over 2.5 Goals + BTTS bet for the match provided.
+The match data is REAL — from a live sports API. Do not question or replace it.
 Respond ONLY with valid JSON:
 {"vote":"YES" or "NO","confidence":0-100,"reason":"one sentence","key_signal":"most important number"}`
   },
   advocate: {
-    name:  "The Advocate",
-    icon:  "🟢",
-    color: "green",
-    model: "gpt",
+    name: "The Advocate", icon: "🟢", color: "green", model: "gpt",
     system: `You are a football betting advocate. Make the strongest case FOR betting Over 2.5 Goals + BTTS.
-Find every positive signal. Be persuasive but only use the data provided.
+The match data is REAL — from a live sports API. Use only the data provided, do not invent details.
 Respond ONLY with valid JSON:
 {"vote":"YES" or "NO","confidence":0-100,"reason":"one sentence","key_signal":"strongest positive signal"}`
   },
   skeptic: {
-    name:  "The Skeptic",
-    icon:  "🔴",
-    color: "red",
-    model: "deepseek",
+    name: "The Skeptic", icon: "🔴", color: "red", model: "deepseek",
     system: `You are a football betting skeptic. Find every reason the Over 2.5 Goals + BTTS bet will FAIL.
-Look for: clean sheet risk, heavy favourite, weak xG, low confidence, misaligned market.
-If you find a fatal flaw label it: "FATAL FLAW: [reason]"
+The match data is REAL — from a live sports API. Only use the provided data.
+If you find a fatal flaw, label it: "FATAL FLAW: [reason]"
 Respond ONLY with valid JSON:
 {"vote":"YES" or "NO","confidence":0-100,"reason":"one sentence","key_signal":"biggest red flag or N/A"}`
   }
 }
 
-// ── Game brief ────────────────────────────
+// ── Game brief using only real BSD data ───
 
 function gameBrief(game) {
   const m = game.models
-  return `MATCH: ${game.match}
-LEAGUE: ${game.league}
-KICKOFF: ${game.date} ${game.time}
+  const xgTotal = ((game.expected_home_goals ?? 0) + (game.expected_away_goals ?? 0)).toFixed(2)
 
-PROBABILITIES:
-  Over 1.5: ${(game.prob_over_15 ?? 0).toFixed(1)}%
-  Over 2.5: ${(game.prob_over_25 ?? 0).toFixed(1)}%
-  Over 3.5: ${(game.prob_over_35 ?? 0).toFixed(1)}%
-  BTTS:     ${(game.prob_btts_yes ?? 0).toFixed(1)}%
-  Home Win: ${(game.prob_home_win ?? 0).toFixed(1)}%
-  Draw:     ${(game.prob_draw ?? 0).toFixed(1)}%
-  Away Win: ${(game.prob_away_win ?? 0).toFixed(1)}%
+  return `REAL MATCH FROM BSD SPORTS API:
+Match:  ${game.match}
+League: ${game.league}
+Date:   ${game.date} ${game.time}
+
+PROBABILITY DATA (from ML model):
+  Over 1.5 Goals: ${(game.prob_over_15 ?? 0).toFixed(1)}%
+  Over 2.5 Goals: ${(game.prob_over_25 ?? 0).toFixed(1)}%
+  Over 3.5 Goals: ${(game.prob_over_35 ?? 0).toFixed(1)}%
+  BTTS Yes:       ${(game.prob_btts_yes ?? 0).toFixed(1)}%
+  Home Win:       ${(game.prob_home_win ?? 0).toFixed(1)}%
+  Draw:           ${(game.prob_draw ?? 0).toFixed(1)}%
+  Away Win:       ${(game.prob_away_win ?? 0).toFixed(1)}%
 
 EXPECTED GOALS:
-  Home xG: ${game.expected_home_goals?.toFixed(2) ?? "N/A"}
-  Away xG: ${game.expected_away_goals?.toFixed(2) ?? "N/A"}
-  Total:   ${((game.expected_home_goals ?? 0) + (game.expected_away_goals ?? 0)).toFixed(2)}
+  Home xG: ${(game.expected_home_goals ?? 0).toFixed(2)}
+  Away xG: ${(game.expected_away_goals ?? 0).toFixed(2)}
+  Total:   ${xgTotal}
 
 MODEL SIGNALS:
   Predicted result:    ${game.predicted_result ?? "N/A"}
@@ -80,7 +72,7 @@ MODEL SIGNALS:
   BSD recommends BTTS: ${game.btts_recommend ? "YES" : "NO"}
   BSD recommends O2.5: ${game.over_25_recommend ? "YES" : "NO"}
 
-ML ENSEMBLE (XGBoost + LightGBM + CatBoost):
+OUR ML ENSEMBLE (XGBoost + LightGBM + CatBoost):
   XGBoost:  ${(m.xgboost.score * 100).toFixed(1)}% (${m.xgboost.label})
   LightGBM: ${(m.lightgbm.score * 100).toFixed(1)}% (${m.lightgbm.label})
   CatBoost: ${(m.catboost.score * 100).toFixed(1)}% (${m.catboost.label})
@@ -90,14 +82,13 @@ ML ENSEMBLE (XGBoost + LightGBM + CatBoost):
 // ── Debate one game ───────────────────────
 
 async function debateGame(game) {
-  const brief = gameBrief(game)
-  const userPrompt = `Analyze this match for Over 2.5 Goals + BTTS:\n\n${brief}`
+  const brief      = gameBrief(game)
+  const userPrompt = `Analyze this REAL match for Over 2.5 Goals + BTTS:\n\n${brief}`
 
   console.log(`  ⚡ ${game.match}`)
 
   const votes = {}
 
-  // Run all 3 in parallel
   await Promise.all(
     Object.entries(PERSONAS).map(async ([key, persona]) => {
       try {
@@ -125,7 +116,6 @@ async function debateGame(game) {
 
   console.log()
 
-  // Consensus: count valid YES votes
   const valid    = Object.values(votes).filter(v => v.vote !== "ERROR")
   const yesCount = valid.filter(v => v.vote === "YES").length
   const total    = valid.length || 1
@@ -157,7 +147,7 @@ async function debateGame(game) {
 async function run() {
   console.log("\n╔══════════════════════════════════════╗")
   console.log("║  Team Free Will — AI Debate Engine   ║")
-  console.log("║  DeepSeek · GPT-4o · DeepSeek       ║")
+  console.log("║  Real BSD games · DeepSeek + GPT     ║")
   console.log("╚══════════════════════════════════════╝\n")
 
   let top10 = []
@@ -165,7 +155,7 @@ async function run() {
     const raw = JSON.parse(fs.readFileSync("public/freewill-predictions.json"))
     top10 = raw.top10 || []
   } catch {
-    console.error("❌ public/freewill-predictions.json not found — run freewill-engine.js first")
+    console.error("❌ freewill-predictions.json not found — run freewill-engine.js first")
     process.exit(1)
   }
 
@@ -177,7 +167,7 @@ async function run() {
     return
   }
 
-  console.log(`📋 Debating ${top10.length} games...\n`)
+  console.log(`📋 Debating ${top10.length} real BSD games...\n`)
 
   const results = []
   for (const game of top10) {
@@ -201,7 +191,7 @@ async function run() {
     results
   }, null, 2))
 
-  console.log(`\n✅ Done — ${passed.length}/${results.length} passed\n`)
+  console.log(`\n✅ Done — ${passed.length}/${results.length} games passed\n`)
 }
 
 run()
