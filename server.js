@@ -12,47 +12,58 @@ const { exec } = require("child_process")
 const app  = express()
 const PORT = process.env.PORT || 3000
 
-const STALE_MS = 23 * 60 * 60 * 1000
+const TWENTY_THREE_HOURS = 23 * 60 * 60 * 1000
 
+// Check last_scan INSIDE the JSON — not file mtime.
+// Render wipes files on restart so mtime is always "now".
+// Reading last_scan from content survives redeploys as long
+// as the file was written during this dyno session.
 function isStale(filePath) {
-  try { return (Date.now() - fs.statSync(filePath).mtimeMs) > STALE_MS }
-  catch { return true }
+  try {
+    const raw  = fs.readFileSync(filePath, "utf8")
+    const data = JSON.parse(raw)
+    if (!data.last_scan) return true
+    const age = Date.now() - new Date(data.last_scan).getTime()
+    return age > TWENTY_THREE_HOURS
+  } catch {
+    return true // file missing or unreadable → needs a scan
+  }
 }
 
 app.use(express.static(path.join(__dirname, "public")))
 app.use(express.json())
 
-// ── Pages ──────────────────────────────────
+// ── Pages ───────────────────────────────────
 app.get("/",         (req,res) => res.sendFile(path.join(__dirname,"public/index.html")))
 app.get("/history",  (req,res) => res.sendFile(path.join(__dirname,"public/history.html")))
 app.get("/accas",    (req,res) => res.sendFile(path.join(__dirname,"public/accas.html")))
 app.get("/freewill", (req,res) => res.sendFile(path.join(__dirname,"public/freewill.html")))
 
-// ── API: predictions ────────────────────────
+// ── API: predictions ─────────────────────────
 app.get("/predictions", (req,res) => {
   try { res.json(JSON.parse(fs.readFileSync(path.join(__dirname,"public/predictions.json")))) }
   catch { res.json({last_scan:null,games_scanned:0,candidates:0,ai_confirmed:0,predictions:[]}) }
 })
 
-// ── API: accas (FIXED: /api/accas not /accas) ─
+// ── API: accas ───────────────────────────────
 app.get("/api/accas", (req,res) => {
   try { res.json(JSON.parse(fs.readFileSync(path.join(__dirname,"public/accas.json")))) }
   catch { res.json({last_scan:null,date_label:null,accas:[]}) }
 })
 
-// ── API: freewill predictions ───────────────
+// ── API: freewill predictions ────────────────
 app.get("/freewill-predictions", (req,res) => {
   try { res.json(JSON.parse(fs.readFileSync(path.join(__dirname,"public/freewill-predictions.json")))) }
   catch { res.json({last_scan:null,games_scanned:0,games_in_24h:0,confirmed:0,top10:[]}) }
 })
 
-// ── API: freewill debate ────────────────────
+// ── API: freewill debate ─────────────────────
 app.get("/freewill-debate", (req,res) => {
   try { res.json(JSON.parse(fs.readFileSync(path.join(__dirname,"public/freewill-debate.json")))) }
   catch { res.json({last_scan:null,games_debated:0,passed:0,results:[]}) }
 })
 
-// ── API: win/loss results ───────────────────
+// ── API: win/loss results ────────────────────
 app.post("/api/result", (req,res) => {
   try {
     const { key, result } = req.body
@@ -72,7 +83,7 @@ app.get("/api/results", (req,res) => {
   catch { res.json({}) }
 })
 
-// ── Manual triggers ─────────────────────────
+// ── Manual triggers ──────────────────────────
 app.get("/run-engine", (req,res) => {
   exec("node engine.js", (err,stdout,stderr) => {
     if(err) return res.status(500).json({error:err.message,stderr})
@@ -105,24 +116,31 @@ app.get("/run-freewill-debate", (req,res) => {
 })
 
 app.get("/status", (req,res) => {
-  function age(p) {
-    try { return Math.round((Date.now()-fs.statSync(p).mtimeMs)/60000)+"m ago" }
-    catch { return "missing" }
+  function scanAge(p) {
+    try {
+      const d = JSON.parse(fs.readFileSync(p))
+      if (!d.last_scan) return "no scan yet"
+      const mins = Math.round((Date.now() - new Date(d.last_scan).getTime()) / 60000)
+      return mins + "m ago"
+    } catch { return "missing" }
   }
   res.json({
-    predictions: age(path.join(__dirname,"public/predictions.json")),
-    accas:       age(path.join(__dirname,"public/accas.json")),
-    freewill:    age(path.join(__dirname,"public/freewill-predictions.json")),
-    debate:      age(path.join(__dirname,"public/freewill-debate.json")),
-    timezone:    process.env.SCAN_TIMEZONE || "UTC",
+    predictions: scanAge(path.join(__dirname,"public/predictions.json")),
+    accas:       scanAge(path.join(__dirname,"public/accas.json")),
+    freewill:    scanAge(path.join(__dirname,"public/freewill-predictions.json")),
+    debate:      scanAge(path.join(__dirname,"public/freewill-debate.json")),
+    timezone:    process.env.SCAN_TIMEZONE || "Europe/Sofia",
     llmapi_key:  process.env.LLMAPI_KEY ? "set" : "not set",
     bsd_token:   process.env.BSD_TOKEN   ? "set" : "not set"
   })
 })
 
-// ── Startup ─────────────────────────────────
+// ── Startup: only run engines if last_scan is old ──
+// Uses last_scan inside JSON — survives Render restarts
+// without re-running engines unnecessarily.
+
 function runOnStartup() {
-  const tz = process.env.SCAN_TIMEZONE || "UTC"
+  const tz = process.env.SCAN_TIMEZONE || "Europe/Sofia"
   console.log(`  Timezone : ${tz}`)
   console.log(`  LLMAPI   : ${process.env.LLMAPI_KEY ? "✓" : "✗ not set"}`)
   console.log(`  BSD      : ${process.env.BSD_TOKEN  ? "✓" : "✗ not set"}\n`)
@@ -138,7 +156,7 @@ function runOnStartup() {
       else    console.log("✓ Main engine done")
     })
   } else {
-    console.log("✓ predictions fresh — skipping main engine")
+    console.log("✓ predictions up to date — skipping main engine")
   }
 
   if (isStale(accasPath)) {
@@ -148,7 +166,7 @@ function runOnStartup() {
       else    console.log("✓ Accas engine done")
     })
   } else {
-    console.log("✓ accas fresh — skipping accas engine")
+    console.log("✓ accas up to date — skipping accas engine")
   }
 
   if (isStale(fwPath)) {
@@ -166,7 +184,7 @@ function runOnStartup() {
       }
     })
   } else {
-    console.log("✓ freewill fresh — skipping FreeWill engine")
+    console.log("✓ freewill up to date — skipping FreeWill engine")
   }
 }
 
