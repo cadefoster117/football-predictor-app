@@ -1,207 +1,143 @@
-// ══════════════════════════════════════════
-//  AivsBookie — accas-engine.js
-//  Fetches REAL today's fixtures from BSD
-//  then asks DeepSeek to build 3 accas
-//  from ONLY those actual games.
-//  No hallucination possible.
-// ══════════════════════════════════════════
+// AivsBookie — accas.js
 
-require("dotenv").config()
+const ACCA_COLORS = { safe: "green", value: "amber", bold: "red" }
 
-const fs    = require("fs")
-const path  = require("path")
-const axios = require("axios")
-const { callLLM } = require("./llm-helper")
+function renderAcca(acca) {
+  if (!acca) return ""
+  const color = ACCA_COLORS[acca.type] || "green"
 
-const BSD_TOKEN = process.env.BSD_TOKEN
-const TIMEZONE  = process.env.SCAN_TIMEZONE || "Europe/Sofia"
-
-// ── Get today's date in Sofia time ────────
-
-function getTodayISO() {
-  return new Date().toLocaleDateString("en-CA", { timeZone: TIMEZONE }) // "YYYY-MM-DD"
-}
-
-function getTodayLabel() {
-  return new Date().toLocaleDateString("en-GB", {
-    timeZone: TIMEZONE,
-    weekday: "long", day: "numeric", month: "long", year: "numeric"
-  })
-}
-
-// ── Fetch today's fixtures from BSD ───────
-
-async function fetchTodayFixtures() {
-  const dateISO = getTodayISO()
-  const all     = []
-  let url = `https://sports.bzzoiro.com/api/predictions/?upcoming=true`
-
-  while (url) {
-    const res  = await axios.get(url, {
-      headers: { Authorization: `Token ${BSD_TOKEN}` }
-    })
-    all.push(...(res.data.results || []))
-    url = res.data.next || null
+  if (acca.error || !acca.selections?.length) {
+    return `
+      <div class="acca-block">
+        <div class="acca-block-header">
+          <div>
+            <div class="acca-block-title" style="color:var(--${color})">${acca.label || "Accumulator"}</div>
+            <div class="acca-block-sub">Could not generate</div>
+          </div>
+        </div>
+        <div style="padding:20px;font-family:var(--mono);font-size:0.75rem;color:var(--text-dim)">
+          ${acca.summary || "Try /run-accas to regenerate"}
+        </div>
+      </div>`
   }
 
-  // Filter to today only (Sofia time)
-  const todayFixtures = all.filter(p => {
-    if (!p.event?.event_date) return false
-    const kickoffISO = new Date(p.event.event_date)
-      .toLocaleDateString("en-CA", { timeZone: TIMEZONE })
-    return kickoffISO === dateISO
-  })
+  const picks = acca.selections.map((s, i) => `
+    <div class="acca-pick-row">
+      <div class="acca-pick-num">${i + 1}</div>
+      <div class="acca-pick-info">
+        <div class="acca-pick-league">${s.league || ""}</div>
+        <div class="acca-pick-match">${s.match || "Unknown"}</div>
+        <div class="acca-pick-time">${s.kickoff ? "⏰ " + s.kickoff : ""}</div>
+        <div class="acca-pick-reason">${s.reason || ""}</div>
+      </div>
+      <div class="acca-pick-market">
+        <div class="acca-market-name">${s.bet || "—"}</div>
+        <div class="acca-market-prob" style="color:var(--${color})">${s.estimated_odds ? s.estimated_odds + "x" : "—"}</div>
+      </div>
+    </div>`).join("")
 
-  return todayFixtures.map(p => ({
-    match:        `${p.event.home_team} vs ${p.event.away_team}`,
-    league:       p.event.league?.name || "Unknown",
-    kickoff:      new Date(p.event.event_date).toLocaleTimeString("en-GB", {
-                    timeZone: TIMEZONE, hour: "2-digit", minute: "2-digit"
-                  }),
-    over25:       p.prob_over_25?.toFixed(1) + "%",
-    btts:         p.prob_btts_yes?.toFixed(1) + "%",
-    home_win:     p.prob_home_win?.toFixed(1) + "%",
-    draw:         p.prob_draw?.toFixed(1) + "%",
-    away_win:     p.prob_away_win?.toFixed(1) + "%",
-    over15:       p.prob_over_15?.toFixed(1) + "%",
-    over35:       p.prob_over_35?.toFixed(1) + "%",
-    xg_home:      p.expected_home_goals?.toFixed(2),
-    xg_away:      p.expected_away_goals?.toFixed(2),
-    likely_score: p.most_likely_score || "N/A",
-    confidence:   p.confidence != null ? (p.confidence * 100).toFixed(0) + "%" : "N/A",
-    btts_rec:     p.btts_recommend    ? "YES" : "NO",
-    over25_rec:   p.over_25_recommend ? "YES" : "NO",
-  }))
+  return `
+    <div class="acca-block">
+      <div class="acca-block-header">
+        <div>
+          <div class="acca-block-title" style="color:var(--${color})">${acca.label}</div>
+          <div class="acca-block-sub">${acca.selections.length} selections · DeepSeek AI · ${acca.date || ""}</div>
+        </div>
+        <div class="acca-block-odds">
+          <div class="acca-odds-val" style="color:var(--${color})">${acca.estimated_total_odds}x</div>
+          <div class="acca-odds-label">total odds</div>
+        </div>
+      </div>
+      <div class="acca-picks-list">${picks}</div>
+      <div class="acca-footer">
+        <div class="acca-combined">${acca.summary || ""}</div>
+        <div class="acca-warning">⚠ AI estimates only — always verify with bookmaker</div>
+      </div>
+    </div>`
 }
 
-// ── Build one acca from real fixtures ─────
+async function init() {
+  const heroTitle = document.getElementById("hero-title")
+  const heroSub   = document.getElementById("hero-sub")
+  const strip     = document.getElementById("stats-strip")
+  const container = document.getElementById("accas-container")
 
-const SYSTEM_PROMPT = `You are a professional football betting analyst.
-You will be given a list of REAL football fixtures happening TODAY with their actual probability data.
-Your job is to select the best bets from ONLY the fixtures provided — do not add any other matches.
-Respond ONLY with valid JSON. No markdown, no text outside the JSON.`
+  // Show loading state immediately
+  heroTitle.textContent = "Loading Accas..."
+  heroSub.textContent   = "—"
 
-async function buildAcca(targetOdds, type, fixtures, dateLabel, dateISO) {
-  const fixtureList = fixtures.map((f, i) =>
-    `${i+1}. ${f.match} (${f.league}) — Kickoff: ${f.kickoff}
-   Over1.5: ${f.over15} | Over2.5: ${f.over25} | Over3.5: ${f.over35}
-   BTTS: ${f.btts} | Home: ${f.home_win} | Draw: ${f.draw} | Away: ${f.away_win}
-   xG: ${f.xg_home}(H) / ${f.xg_away}(A) | Likely score: ${f.likely_score} | Confidence: ${f.confidence}
-   Recommends → BTTS: ${f.btts_rec} | Over2.5: ${f.over25_rec}`
-  ).join("\n\n")
-
-  const userPrompt = `TODAY: ${dateLabel} (${dateISO})
-
-Here are the ONLY real fixtures available today. You MUST only pick from this list:
-
-${fixtureList}
-
-Build a football accumulator from these fixtures with total odds of approximately ${targetOdds}.
-Pick the best value markets (Over/Under, BTTS, Home Win, Away Win, Draw, etc).
-
-Respond with ONLY this JSON:
-{
-  "label": "short name for this acca",
-  "target_odds": ${targetOdds},
-  "estimated_total_odds": number,
-  "selections": [
-    {
-      "match": "exact match name from the list above",
-      "league": "league name",
-      "kickoff": "HH:MM",
-      "bet": "exact bet e.g. Over 2.5 Goals",
-      "estimated_odds": number,
-      "reason": "one sentence why"
-    }
-  ],
-  "summary": "one sentence about this acca"
-}`
-
-  return await callLLM("deepseek", SYSTEM_PROMPT, userPrompt)
-}
-
-// ── Main ──────────────────────────────────
-
-async function run() {
-  console.log("\n╔══════════════════════════════╗")
-  console.log("║  AivsBookie — Accas Engine   ║")
-  console.log("╚══════════════════════════════╝\n")
-
-  if (!BSD_TOKEN) {
-    console.error("❌ BSD_TOKEN not set in .env")
-    process.exit(1)
-  }
-
-  const dateISO   = getTodayISO()
-  const dateLabel = getTodayLabel()
-  console.log(`📅 ${dateLabel} (${dateISO}) — ${TIMEZONE}`)
-
-  console.log("📡 Fetching today's fixtures from BSD API...")
-  let fixtures = []
   try {
-    fixtures = await fetchTodayFixtures()
-    console.log(`   ✅ ${fixtures.length} real fixtures found for today\n`)
-  } catch (err) {
-    console.error("❌ Failed to fetch fixtures:", err.message)
-    process.exit(1)
-  }
+    const res = await fetch("/api/accas")
 
-  if (fixtures.length === 0) {
-    console.log("⚠ No fixtures found for today — writing empty output")
-    fs.writeFileSync(
-      path.join(__dirname, "public/accas.json"),
-      JSON.stringify({
-        last_scan: new Date().toISOString(),
-        date_label: dateLabel,
-        date_iso:   dateISO,
-        timezone:   TIMEZONE,
-        accas:      [],
-        note:       "No fixtures found for today"
-      }, null, 2)
-    )
-    return
-  }
-
-  const targets = [
-    { odds: 2.00,  type: "safe"  },
-    { odds: 5.00,  type: "value" },
-    { odds: 10.00, type: "bold"  },
-  ]
-
-  const accas = []
-
-  for (const t of targets) {
+    // If server returns non-JSON (e.g. HTML error page), catch it cleanly
+    const text = await res.text()
+    let data
     try {
-      console.log(`🤖 Building ~${t.odds} odds acca...`)
-      const acca = await buildAcca(t.odds, t.type, fixtures, dateLabel, dateISO)
-      accas.push({ ...acca, type: t.type, date: dateISO })
-      console.log(`   ✅ ${acca.selections?.length || 0} picks — est. ${acca.estimated_total_odds}x`)
-    } catch (err) {
-      console.error(`   ❌ Failed:`, err.message)
-      accas.push({
-        type: t.type, label: `~${t.odds} Accumulator`,
-        target_odds: t.odds, estimated_total_odds: t.odds,
-        date: dateISO, selections: [],
-        summary: `Could not generate — ${err.message}`,
-        error: true
-      })
+      data = JSON.parse(text)
+    } catch {
+      throw new Error("Server returned invalid response — engine may still be running")
     }
-    await new Promise(r => setTimeout(r, 800))
+
+    // No accas yet — engine hasn't run
+    if (!data.accas?.length) {
+      heroTitle.textContent = "Accas generating..."
+      heroSub.textContent   = "First run takes ~30 seconds — refresh in a moment"
+      container.innerHTML = `
+        <div class="state-msg">
+          <div class="state-icon">⏳</div>
+          The accas engine is running for the first time today.<br>
+          <strong>Refresh this page in 30–60 seconds.</strong><br><br>
+          Or trigger manually: <code>/run-accas</code>
+        </div>`
+      return
+    }
+
+    const scanTime = new Date(data.last_scan).toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" })
+    heroTitle.textContent = "Today's Accumulators"
+    heroSub.textContent   = `${data.date_label || ""} · DeepSeek AI · Updated ${scanTime}`
+
+    // Stats strip
+    data.accas.forEach(a => {
+      const color = ACCA_COLORS[a.type] || "green"
+      const b = document.createElement("div")
+      b.className = "stat-box"
+      b.innerHTML = `
+        <div class="s-label">${a.type?.toUpperCase() || "ACCA"}</div>
+        <div class="s-value ${color}">${a.error ? "ERR" : (a.estimated_total_odds || "?") + "x"}</div>`
+      strip.appendChild(b)
+    })
+
+    const titles = {
+      safe:  "Safe Accumulator (~2.00 odds)",
+      value: "Value Accumulator (~5.00 odds)",
+      bold:  "Bold Accumulator (~10.00 odds)"
+    }
+
+    container.innerHTML = data.accas.map(acca =>
+      `<div class="section-head">${titles[acca.type] || "Accumulator"}</div>${renderAcca(acca)}`
+    ).join("")
+
+    if (!document.getElementById("acca-extra-style")) {
+      const s = document.createElement("style")
+      s.id = "acca-extra-style"
+      s.textContent = `
+        .acca-pick-reason { font-family:var(--sans); font-size:0.8rem; color:var(--text-dim); margin-top:3px; font-style:italic; }
+        .acca-pick-time   { font-family:var(--mono); font-size:0.62rem; color:var(--text-mid); margin-top:2px; }
+      `
+      document.head.appendChild(s)
+    }
+
+  } catch (err) {
+    heroTitle.textContent = "Accas not ready yet"
+    heroSub.textContent   = "Engine runs once daily at midnight Sofia time"
+    container.innerHTML = `
+      <div class="state-msg">
+        <div class="state-icon">⏳</div>
+        ${err.message}<br><br>
+        Accas are generated once per day at midnight.<br>
+        Trigger manually: <code>/run-accas</code>
+      </div>`
   }
-
-  fs.writeFileSync(
-    path.join(__dirname, "public/accas.json"),
-    JSON.stringify({
-      last_scan:       new Date().toISOString(),
-      date_label:      dateLabel,
-      date_iso:        dateISO,
-      timezone:        TIMEZONE,
-      fixtures_used:   fixtures.length,
-      accas
-    }, null, 2)
-  )
-
-  console.log("\n✅ accas.json saved\n")
 }
 
-run()
+init()
