@@ -1,127 +1,214 @@
 // ══════════════════════════════════════════
 //  AivsBookie — accas-engine.js
-//  Generates 3 accumulators using DeepSeek
-//  Restricted to TODAY's fixtures only
+//  Fetches REAL today's fixtures from BSD
+//  Passes them to DeepSeek to pick from ONLY
+//  those actual games. No hallucination.
 // ══════════════════════════════════════════
 
 require("dotenv").config()
 
-const fs   = require("fs")
-const path = require("path")
+const fs    = require("fs")
+const path  = require("path")
+const axios = require("axios")
 const { callLLM } = require("./llm-helper")
 
-const TIMEZONE = process.env.SCAN_TIMEZONE || "Europe/Sofia"
+const BSD_TOKEN = process.env.BSD_TOKEN
+const TIMEZONE  = process.env.SCAN_TIMEZONE || "Europe/Sofia"
 
-// Get today's date in the configured timezone
-function getTodayLabel() {
-  const now = new Date()
-
-  // Full readable label e.g. "Monday, 7 April 2025"
-  const label = now.toLocaleDateString("en-GB", {
-    timeZone: TIMEZONE,
-    weekday: "long",
-    day:     "numeric",
-    month:   "long",
-    year:    "numeric"
-  })
-
-  // ISO date string e.g. "2025-04-07"
-  const iso = now.toLocaleDateString("en-CA", { timeZone: TIMEZONE })
-
-  return { label, iso }
+function getTodayISO() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: TIMEZONE })
 }
 
-const SYSTEM_PROMPT = `You are a professional football betting analyst with expert knowledge of all major European and world football leagues.
-You must ONLY select matches that are scheduled to kick off on the specific date provided. 
-Do NOT select matches from yesterday, tomorrow, or any other date.
-Respond ONLY with a valid JSON object. No markdown, no extra text outside the JSON.`
+function getTodayLabel() {
+  return new Date().toLocaleDateString("en-GB", {
+    timeZone: TIMEZONE,
+    weekday: "long", day: "numeric", month: "long", year: "numeric"
+  })
+}
 
-async function buildAcca(targetOdds, type, dateLabel, dateISO) {
-  const userPrompt = `TODAY'S DATE: ${dateLabel} (${dateISO})
+// ── Fetch ALL pages of predictions from BSD ─
 
-IMPORTANT: You MUST only select football matches kicking off on ${dateISO} (${dateLabel}).
-Do NOT include any match from a different date. If you are unsure of a match date, skip it.
+async function fetchTodayFixtures() {
+  const dateISO = getTodayISO()
+  const all     = []
+  let url = `https://sports.bzzoiro.com/api/predictions/?upcoming=true`
 
-Task: Create a football accumulator with total odds of approximately ${targetOdds}.
-Use the best available betting markets for value: Over/Under Goals, BTTS, Home Win, Away Win, Draw, Double Chance, etc.
+  while (url) {
+    const res = await axios.get(url, {
+      headers: { Authorization: `Token ${BSD_TOKEN}` }
+    })
+    all.push(...(res.data.results || []))
+    url = res.data.next || null
+  }
 
-Respond with ONLY this exact JSON — no other text:
+  // Filter strictly to today in Sofia timezone
+  return all.filter(p => {
+    if (!p.event?.event_date) return false
+    const kickoffISO = new Date(p.event.event_date)
+      .toLocaleDateString("en-CA", { timeZone: TIMEZONE })
+    return kickoffISO === dateISO
+  }).map(p => ({
+    match:        `${p.event.home_team} vs ${p.event.away_team}`,
+    league:       p.event.league?.name || "Unknown",
+    kickoff:      new Date(p.event.event_date)
+                    .toLocaleTimeString("en-GB", { timeZone: TIMEZONE, hour: "2-digit", minute: "2-digit" }),
+    home_win:     (p.prob_home_win  ?? 0).toFixed(1),
+    draw:         (p.prob_draw      ?? 0).toFixed(1),
+    away_win:     (p.prob_away_win  ?? 0).toFixed(1),
+    over15:       (p.prob_over_15   ?? 0).toFixed(1),
+    over25:       (p.prob_over_25   ?? 0).toFixed(1),
+    over35:       (p.prob_over_35   ?? 0).toFixed(1),
+    btts:         (p.prob_btts_yes  ?? 0).toFixed(1),
+    xg_home:      (p.expected_home_goals ?? 0).toFixed(2),
+    xg_away:      (p.expected_away_goals ?? 0).toFixed(2),
+    likely_score: p.most_likely_score || "N/A",
+    confidence:   p.confidence != null ? (p.confidence * 100).toFixed(0) : "N/A",
+    btts_rec:     p.btts_recommend    ? "YES" : "NO",
+    over25_rec:   p.over_25_recommend ? "YES" : "NO"
+  }))
+}
+
+// ── Format fixture list for the AI prompt ──
+
+function formatFixtures(fixtures) {
+  return fixtures.map((f, i) =>
+`${i + 1}. [${f.league}] ${f.match} — KO: ${f.kickoff}
+   1X2: Home ${f.home_win}% / Draw ${f.draw}% / Away ${f.away_win}%
+   Goals: O1.5=${f.over15}%  O2.5=${f.over25}%  O3.5=${f.over35}%
+   BTTS: ${f.btts}%  xG: ${f.xg_home}(H)/${f.xg_away}(A)  Likely: ${f.likely_score}`
+  ).join("\n")
+}
+
+// ── Ask DeepSeek to pick from real fixtures ─
+
+const SYSTEM_PROMPT = `You are a professional football betting analyst.
+You will receive a numbered list of REAL football matches happening TODAY with their actual probability data from a sports model.
+You MUST ONLY select matches from the provided list — use the exact match names as given.
+Do NOT invent, modify, or add any match not in the list.
+Respond ONLY with valid JSON. No markdown, no text outside the JSON.`
+
+async function buildAcca(targetOdds, type, fixtures, dateLabel, dateISO) {
+  const fixtureBlock = formatFixtures(fixtures)
+
+  const userPrompt =
+`DATE: ${dateLabel} (${dateISO})
+
+AVAILABLE REAL MATCHES TODAY (pick ONLY from this list):
+${fixtureBlock}
+
+Task: Choose selections from the list above to build an accumulator with total odds close to ${targetOdds}.
+Use any market that gives good value: Home Win, Away Win, Draw, Over/Under Goals, BTTS, Double Chance.
+Use the probability percentages to guide your selections — higher % = more likely = lower odds.
+
+Rules:
+- ONLY use matches from the numbered list above
+- Use the EXACT match name as written
+- Do not add kickoff times that differ from the list
+- Number of selections should suit the target odds (fewer for ~2.00, more for ~10.00)
+
+Respond with ONLY this JSON:
 {
-  "label": "brief name for this acca",
+  "label": "short acca name",
   "target_odds": ${targetOdds},
   "estimated_total_odds": number,
-  "date": "${dateISO}",
   "selections": [
     {
-      "match": "Home Team vs Away Team",
-      "league": "League Name",
-      "kickoff": "HH:MM",
-      "bet": "Exact bet e.g. Over 2.5 Goals",
+      "match": "exact match name from list",
+      "league": "league name",
+      "kickoff": "HH:MM from list",
+      "bet": "e.g. Over 2.5 Goals",
       "estimated_odds": number,
-      "reason": "One sentence why this is a good pick today"
+      "reason": "one sentence why"
     }
   ],
-  "summary": "One sentence describing this accumulator"
+  "summary": "one sentence about this acca"
 }`
 
   return await callLLM("deepseek", SYSTEM_PROMPT, userPrompt)
 }
 
+// ── Main ───────────────────────────────────
+
 async function run() {
   console.log("\n╔══════════════════════════════╗")
   console.log("║  AivsBookie — Accas Engine   ║")
-  console.log("║  Powered by DeepSeek         ║")
   console.log("╚══════════════════════════════╝\n")
 
-  const { label: dateLabel, iso: dateISO } = getTodayLabel()
-  console.log(`📅 Date: ${dateLabel} (${dateISO}) — ${TIMEZONE}\n`)
+  if (!BSD_TOKEN) {
+    console.error("❌ BSD_TOKEN not set"); process.exit(1)
+  }
+
+  const dateISO   = getTodayISO()
+  const dateLabel = getTodayLabel()
+  console.log(`📅 ${dateLabel} (${dateISO}) — ${TIMEZONE}`)
+
+  console.log("📡 Fetching today's real fixtures from BSD...")
+  let fixtures = []
+  try {
+    fixtures = await fetchTodayFixtures()
+    console.log(`   ✅ ${fixtures.length} real fixtures for today\n`)
+  } catch (err) {
+    console.error("❌ Failed to fetch fixtures:", err.message)
+    process.exit(1)
+  }
+
+  if (fixtures.length === 0) {
+    console.log("⚠ No fixtures for today — writing empty output")
+    fs.writeFileSync(path.join(__dirname,"public/accas.json"), JSON.stringify({
+      last_scan: new Date().toISOString(),
+      date_label: dateLabel, date_iso: dateISO, timezone: TIMEZONE,
+      fixtures_found: 0, accas: [], note: "No fixtures found for today"
+    }, null, 2))
+    return
+  }
 
   const targets = [
     { odds: 2.00,  type: "safe"  },
     { odds: 5.00,  type: "value" },
-    { odds: 10.00, type: "bold"  },
+    { odds: 10.00, type: "bold"  }
   ]
 
   const accas = []
 
   for (const t of targets) {
     try {
-      console.log(`🤖 Building ~${t.odds} odds acca for ${dateISO}...`)
-      const acca = await buildAcca(t.odds, t.type, dateLabel, dateISO)
+      console.log(`🤖 Building ~${t.odds} odds acca from ${fixtures.length} real games...`)
+      const acca = await buildAcca(t.odds, t.type, fixtures, dateLabel, dateISO)
 
-      // Sanity check: warn if any selection has a wrong date
-      const wrongDate = (acca.selections || []).filter(s => {
-        if (!s.kickoff) return false
-        // Can't check date from kickoff time alone — just log
-        return false
-      })
+      // Validate: check every selection exists in our fixture list
+      const matchNames = fixtures.map(f => f.match.toLowerCase())
+      const invalid = (acca.selections || []).filter(
+        s => !matchNames.some(m => m.includes(s.match?.toLowerCase()?.split(" vs ")[0]?.trim() || ""))
+      )
+      if (invalid.length > 0) {
+        console.warn(`   ⚠ ${invalid.length} selection(s) not found in BSD fixture list — removing`)
+        acca.selections = (acca.selections || []).filter(
+          s => matchNames.some(m => m.includes(s.match?.toLowerCase()?.split(" vs ")[0]?.trim() || ""))
+        )
+      }
 
-      accas.push({ ...acca, type: t.type, generated_for: dateISO })
-      console.log(`   ✅ ${acca.selections?.length || 0} selections — est. ${acca.estimated_total_odds}x`)
+      accas.push({ ...acca, type: t.type, date: dateISO })
+      console.log(`   ✅ ${acca.selections?.length || 0} valid picks — est. ${acca.estimated_total_odds}x`)
     } catch (err) {
       console.error(`   ❌ Failed:`, err.message)
       accas.push({
-        type:                 t.type,
-        label:                `~${t.odds} Accumulator`,
-        target_odds:          t.odds,
-        estimated_total_odds: t.odds,
-        date:                 dateISO,
-        generated_for:        dateISO,
-        selections:           [],
-        summary:              `Could not generate — ${err.message}`,
-        error:                true
+        type: t.type, label: `~${t.odds} Accumulator`,
+        target_odds: t.odds, estimated_total_odds: t.odds,
+        date: dateISO, selections: [],
+        summary: `Could not generate — ${err.message}`, error: true
       })
     }
     await new Promise(r => setTimeout(r, 800))
   }
 
   fs.writeFileSync(
-    path.join(__dirname, "public/accas.json"),
+    path.join(__dirname,"public/accas.json"),
     JSON.stringify({
-      last_scan:  new Date().toISOString(),
-      date_label: dateLabel,
-      date_iso:   dateISO,
-      timezone:   TIMEZONE,
+      last_scan:      new Date().toISOString(),
+      date_label:     dateLabel,
+      date_iso:       dateISO,
+      timezone:       TIMEZONE,
+      fixtures_found: fixtures.length,
       accas
     }, null, 2)
   )
